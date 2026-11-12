@@ -10,12 +10,14 @@
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/v2-ui.css') }}">
 </head>
 <body>
     <div id="toast-container"></div>
 
     <div class="container">
-        <header>
+        <header class="app-header">
+            <div class="brand-block">
             <h1>
                 <svg class="logo" viewBox="0 0 130 50" xmlns="http://www.w3.org/2000/svg">
                     <path d="M 10 25 C 20 5, 30 45, 40 25 C 50 5, 60 45, 70 25" fill="none" stroke="var(--primary-color)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -25,13 +27,39 @@
                 EchoMetrics
             </h1>
             <p>Carcass Ultrasound Analyzer</p>
+            </div>
+            <div class="header-support">
+                <span class="ui-version">v2.0 · Development</span>
+                <a class="header-link" href="https://github.com/CintiaAraujo-Zoo/EchoMetrics" target="_blank" rel="noopener noreferrer"><i class="fa-brands fa-github" aria-hidden="true"></i> Source code</a>
+            </div>
         </header>
+
+        <section class="workspace-heading" aria-label="Workspace overview">
+            <div>
+                <span class="workspace-eyebrow">Measurement workspace</span>
+                <h2>Ultrasound image analysis</h2>
+                <p>Calibrate, measure and export reproducible results.</p>
+            </div>
+            <span class="workspace-note">AOL / REA &nbsp; · &nbsp; EGS / BFT</span>
+        </section>
+
+        <nav class="workflow-steps" id="analysisFlow" aria-label="Analysis workflow">
+            <div class="workflow-step is-current" data-flow-step="upload" aria-current="step"><span class="step-number"><span>1</span></span> Import</div>
+            <div class="workflow-step" data-flow-step="calibrate"><span class="step-number"><span>2</span></span> Calibrate</div>
+            <div class="workflow-step" data-flow-step="outline"><span class="step-number"><span>3</span></span> Outline AOL</div>
+            <div class="workflow-step" data-flow-step="fat"><span class="step-number"><span>4</span></span> Measure EGS</div>
+            <div class="workflow-step" data-flow-step="results"><span class="step-number"><span>5</span></span> Results</div>
+        </nav>
 
         <div class="main-content">
 
             <!-- Controls panel -->
             <div class="controls-panel">
-                <h2><i class="fa-solid fa-sliders"></i> Controls</h2>
+                <div class="panel-heading">
+                    <span class="panel-eyebrow">01 / Configure</span>
+                    <h2><i class="fa-solid fa-sliders" aria-hidden="true"></i> Analysis setup</h2>
+                    <p>Choose the mode and identify your measurements.</p>
+                </div>
 
                 <div class="mode-selection">
                     <strong>Analysis Mode:</strong>
@@ -46,11 +74,35 @@
                         <i class="fa-solid fa-play"></i> Start Batch
                     </button>
                 </div>
+                <div class="metadata-fields">
+                    <label for="animalId">Animal ID (optional)</label>
+                    <input type="text" id="animalId" placeholder="e.g. SHEEP_012" maxlength="80">
+                    <label for="sessionId">Session ID (optional)</label>
+                    <input type="text" id="sessionId" placeholder="e.g. DAY_01" maxlength="80">
+                    <label for="animalSpecies">Species (optional)</label>
+                    <select id="animalSpecies">
+                        <option value="">Select species</option>
+                        <option value="Ovine">Sheep (ovine)</option>
+                        <option value="Bovine">Cattle (bovine)</option>
+                        <option value="Caprine">Goat (caprine)</option>
+                        <option value="Other">Other</option>
+                    </select>
+                    <label for="bodyCondition">Body condition score (optional)</label>
+                    <input type="text" id="bodyCondition" maxlength="40" placeholder="e.g. 2/5 (include the scale)">
+                    <label for="scaleLengthCm">Scale reference length (cm) — set before loading image</label>
+                    <input type="number" id="scaleLengthCm" min="0.001" max="1000" step="any" value="1" required>
+                </div>
                 <hr>
 
                 <div id="file-upload-area">
-                    <p><strong><i class="fa-solid fa-file-arrow-up"></i> File:</strong></p>
-                    <input type="file" id="imageLoader" accept="image/*">
+                    <span class="upload-heading">Ultrasound image</span>
+                    <label for="imageLoader" id="uploadDropzone" class="upload-dropzone">
+                        <span class="upload-icon"><i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i></span>
+                        <strong>Click to select an image</strong>
+                        <small>or drag and drop it here</small>
+                        <input type="file" id="imageLoader" accept=".png,.jpg,.jpeg,.bmp,.gif,image/png,image/jpeg,image/bmp,image/gif">
+                    </label>
+                    <p id="fileSelectedName" aria-live="polite">PNG, JPG, BMP or GIF · max. 20 MB</p>
                 </div>
 
                 <button id="resetButton" class="btn btn-danger">
@@ -58,6 +110,10 @@
                 </button>
 
                 <!-- Download button — hidden until batch has at least one row -->
+                <button id="downloadAnnotatedButton" class="btn btn-secondary hidden" style="margin-top: 10px;">
+                    <i class="fa-solid fa-image"></i> Download annotated image
+                </button>
+
                 <button id="downloadExcelButton" class="btn btn-success hidden" style="margin-top: 10px;">
                     <i class="fa-solid fa-file-excel"></i> Download Excel
                 </button>
@@ -72,13 +128,21 @@
 
             <!-- Image display -->
             <div class="canvas-container">
-                <p>The annotated image will appear here.</p>
+                <div class="empty-stage" aria-label="No ultrasound image analyzed yet">
+                    <span class="empty-icon"><i class="fa-regular fa-image" aria-hidden="true"></i></span>
+                    <h3>Your image workspace</h3>
+                    <p>Upload an ultrasound image to start calibrating and tracing the measurements.</p>
+                </div>
                 <img id="finalImage" src="" alt="Annotated ultrasound image" />
             </div>
 
             <!-- Results panel -->
             <div class="results-panel">
-                <h2><i class="fa-solid fa-chart-bar"></i> Results</h2>
+                <div class="panel-heading">
+                    <span class="panel-eyebrow">03 / Review</span>
+                    <h2><i class="fa-solid fa-chart-simple" aria-hidden="true"></i> Results</h2>
+                    <p>Measurement values will appear after analysis.</p>
+                </div>
                 <div class="result-item">
                     <span>Longissimus dorsi area (AOL):</span>
                     <strong id="aolResult">-- cm²</strong>
@@ -91,6 +155,10 @@
                     <span>Calibration:</span>
                     <i id="calibrationResult">-- px/cm</i>
                 </div>
+                <p id="measurementContext" class="measurement-context hidden" aria-live="polite"></p>
+                <button id="reviewMeasurementsButton" type="button" class="btn btn-secondary hidden">
+                    <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Review / edit measurements
+                </button>
             </div>
         </div>
 
@@ -115,6 +183,18 @@
                 </div>
                 <button id="close-modal" class="close-button">×</button>
             </div>
+            <div id="reviewToolbar" class="review-toolbar hidden" aria-label="Edit annotations">
+                <div class="review-edit-tools">
+                    <button type="button" id="reviewEditScale">Edit scale</button>
+                    <button type="button" id="reviewEditAol">Edit AOL</button>
+                    <button type="button" id="reviewEditFat">Edit EGS</button>
+                    <button type="button" id="reviewClearPoints">Clear selected tool points</button>
+                </div>
+                <div class="review-decision-tools">
+                    <button type="button" id="reviewCancel" class="btn btn-secondary">Cancel changes</button>
+                    <button type="button" id="reviewSave" class="btn btn-success">Recalculate &amp; save</button>
+                </div>
+            </div>
             <div class="modal-body"><canvas id="modalCanvas"></canvas></div>
             <div class="modal-footer">
                 <p id="modalInstructions">Instructions will appear here.</p>
@@ -126,5 +206,6 @@
     </div>
 
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/v2-ui.js') }}"></script>
 </body>
 </html>

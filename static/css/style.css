@@ -138,3 +138,13 @@ footer { text-align: center; margin-top: 25px; padding-top: 15px; border-top: 1p
 .toast.show { opacity: 1; transform: translateX(0); }
 .toast.success { background-color: var(--success-color); }
 .toast.error { background-color: var(--danger-color); }
+/* EchoMetrics 2.0: metadata controls */
+.metadata-fields {display: grid; gap: 6px; margin: 16px 0;}
+.metadata-fields label {font-size: .89rem; font-weight: 500; color: var(--secondary-color);}
+.metadata-fields input {width: 100%; box-sizing: border-box; padding: 9px 11px;
+  border-radius: var(--border-radius); border: 1px solid var(--border-color); margin-bottom: 7px;}
+@media (max-width: 1100px) {
+  .main-content {flex-direction: column;}
+  .controls-panel, .results-panel {min-width: 0;}
+  .canvas-container {min-height: 320px;}
+}

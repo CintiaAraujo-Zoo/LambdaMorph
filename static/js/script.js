@@ -1,3 +1,4 @@
+/* EchoMetrics 2.1 - annotation review */
 /**
  * EchoMetrics — client-side analysis logic
  *
@@ -33,6 +34,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileUploadArea      = document.getElementById('file-upload-area');
     const toastContainer      = document.getElementById('toast-container');
     const downloadExcelButton = document.getElementById('downloadExcelButton');
+    const downloadAnnotatedButton = document.getElementById('downloadAnnotatedButton');
+    const animalIdInput = document.getElementById('animalId');
+    const sessionIdInput = document.getElementById('sessionId');
+    const scaleLengthInput = document.getElementById('scaleLengthCm');
+    const speciesInput = document.getElementById('animalSpecies');
+    const bodyConditionInput = document.getElementById('bodyCondition');
+    const measurementContext = document.getElementById('measurementContext');
+    const reviewButton = document.getElementById('reviewMeasurementsButton');
+    const reviewToolbar = document.getElementById('reviewToolbar');
+    const reviewSave = document.getElementById('reviewSave');
+    const reviewCancel = document.getElementById('reviewCancel');
 
     // Modal
     const modal               = document.getElementById('modal');
@@ -67,6 +79,10 @@ document.addEventListener('DOMContentLoaded', () => {
             draggedPointIndex: -1,
             hoverPointIndex  : -1,
             mousePos         : { x: 0, y: 0 },
+            reviewMode       : false,
+            reviewSnapshot   : null,
+            lastBatchIndex   : null,
+            calculating     : false,
             zoomLevel        : 1.0,
             canvasW          : 0,
             canvasH          : 0,
@@ -101,6 +117,11 @@ document.addEventListener('DOMContentLoaded', () => {
         batchControls.classList.add('hidden');
         fileUploadArea.classList.remove('hidden');
         if (downloadExcelButton) downloadExcelButton.classList.add('hidden');
+        downloadAnnotatedButton.classList.add('hidden');
+        reviewButton.classList.add('hidden');
+        reviewToolbar.classList.add('hidden');
+        measurementContext.classList.add('hidden');
+        measurementContext.textContent = '';
         imageLoader.value = '';
         finalImageEl.style.display = 'none';
         finalImageEl.src = '';
@@ -115,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const file = event.target.files[0];
         if (!file) return;
 
+        state.sourceFilename = file.name;
         const formData = new FormData();
         formData.append('file', file);
 
@@ -126,6 +148,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.image = new Image();
                 state.image.src = data.url;
                 state.image.onload = () => {
+                    // A new image always begins with a fresh set of annotations.
+                    state.scalePoints = [];
+                    state.aolPoints = [];
+                    state.fatPoints = [];
+                    state.reviewMode = false;
+                    state.reviewSnapshot = null;
+                    state.lastBatchIndex = null;
+                    reviewButton.classList.add('hidden');
+                    measurementContext.classList.add('hidden');
+                    downloadAnnotatedButton.classList.add('hidden');
                     openModal();
                     setStep('CALIBRATING');
                 };
@@ -134,54 +166,103 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function calculateResults() {
-        modalInstructionsEl.innerHTML = 'Calculating…';
-
-        // Densely sample the smooth AOL curve for area accuracy
-        const highResAol = [];
-        if (state.aolPoints.length > 2) {
-            for (let t = 0; t <= 1; t += 0.005) {
-                highResAol.push(getPointOnCurve(state.aolPoints, t));
-            }
+        if (state.calculating) return;
+        const scaleLengthCm = Number(scaleLengthInput.value);
+        if (!Number.isFinite(scaleLengthCm) || scaleLengthCm <= 0) {
+            showToast('Enter a valid positive calibration distance in cm.', 'error');
+            return;
         }
-
+        if (state.scalePoints.length !== 2 || state.aolPoints.length < 3 || state.fatPoints.length !== 2) {
+            showToast('Complete scale, AOL and EGS markings before saving.', 'error');
+            return;
+        }
+        const wasReview = Boolean(state.reviewMode);
+        state.calculating = true;
+        reviewSave.disabled = true;
+        modalInstructionsEl.textContent = 'Calculating…';
+        const highResAol = sampleAolContour(state.aolPoints);
         fetch('/calculate', {
-            method : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body   : JSON.stringify({
-                token      : state.token,
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                token: state.token,
                 scalePoints: state.scalePoints,
-                aolPoints  : highResAol,
-                fatPoints  : state.fatPoints,
+                scaleLengthCm,
+                aolPoints: highResAol,
+                fatPoints: state.fatPoints,
             }),
         })
-        .then(r => r.json())
+        .then(async response => {
+            const result = await response.json();
+            if (!response.ok || result.error) throw new Error(result.error || 'Unable to calculate.');
+            return result;
+        })
         .then(results => {
-            if (results.error) throw new Error(results.error);
-
-            aolResultEl.textContent         = `${results.aol_cm2} cm²`;
-            fatResultEl.textContent         = `${results.fat_thickness_cm} cm`;
+            aolResultEl.textContent = `${results.aol_cm2} cm²`;
+            fatResultEl.textContent = `${results.fat_thickness_cm} cm`;
             calibrationResultEl.textContent = `${results.pixels_per_cm} px/cm`;
 
             if (state.analysisMode === 'batch_running') {
-                saveBatchRow(results.aol_cm2, results.fat_thickness_cm);
+                if (wasReview && Number.isInteger(state.lastBatchIndex) && state.batchRows[state.lastBatchIndex]) {
+                    const row = state.batchRows[state.lastBatchIndex];
+                    row.aol = results.aol_cm2;
+                    row.egs = results.fat_thickness_cm;
+                    row.pixelsPerCm = results.pixels_per_cm;
+                    row.scaleLengthCm = results.scale_length_cm;
+                    row.animalId = animalIdInput.value.trim();
+                    row.sessionId = sessionIdInput.value.trim();
+                    row.species = speciesInput.value;
+                    row.bodyCondition = bodyConditionInput.value.trim();
+                    setStep('DONE');
+                    drawFinalImage();
+                    discardCurrentImage();
+                    state.reviewMode = false;
+                    state.reviewSnapshot = null;
+                    reviewToolbar.classList.add('hidden');
+                    closeModal();
+                    updateMainInstructions();
+                    showToast('Batch row updated — no duplicate added.', 'success');
+                } else {
+                    saveBatchRow(results);
+                }
             } else {
-                discardCurrentImage();
                 setStep('DONE');
-                closeModal();
                 drawFinalImage();
+                discardCurrentImage();
+                state.reviewMode = false;
+                state.reviewSnapshot = null;
+                reviewToolbar.classList.add('hidden');
+                closeModal();
+                updateMainInstructions();
             }
+            reviewButton.classList.remove('hidden');
+            updateMeasurementContext();
         })
         .catch(err => {
             showToast(`Calculation error: ${err.message}`, 'error');
-            resetApplication();
+            if (wasReview) setStep('REVIEW');
+            else setStep('DRAWING_FAT');
+        })
+        .finally(() => {
+            state.calculating = false;
+            reviewSave.disabled = false;
         });
     }
 
-    function saveBatchRow(aol, egs) {
+    function saveBatchRow(results) {
         const imageCode = `${state.batchCode}${String(state.batchCounter).padStart(2, '0')}`;
-
-        // Store row in JS — no server call needed
-        state.batchRows.push({ imageCode, aol, egs });
+        const aol = results.aol_cm2, egs = results.fat_thickness_cm;
+        state.batchRows.push({
+            imageCode, aol, egs,
+            species: speciesInput.value,
+            bodyCondition: bodyConditionInput.value.trim(),
+            originalFilename: state.sourceFilename || '',
+            animalId: animalIdInput.value.trim(),
+            sessionId: sessionIdInput.value.trim(),
+            pixelsPerCm: results.pixels_per_cm,
+            scaleLengthCm: results.scale_length_cm,
+        });
+        state.lastBatchIndex = state.batchRows.length - 1;
         state.batchCounter++;
 
         showToast(`${imageCode} saved (${state.batchRows.length} image${state.batchRows.length > 1 ? 's' : ''} in batch)`, 'success');
@@ -189,10 +270,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Show download button as soon as we have at least one row
         if (downloadExcelButton) downloadExcelButton.classList.remove('hidden');
 
-        discardCurrentImage();
         setStep('DONE');
+        drawFinalImage(); // Copy annotated canvas while points are available.
+        discardCurrentImage();
         closeModal();
-        drawFinalImage();
         updateMainInstructions();
     }
 
@@ -237,9 +318,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function confirmStep() {
+        if (state.currentStep === 'DRAWING_FAT' && !state.reviewMode && state.fatPoints.length === 2) {
+            calculateResults();
+            return;
+        }
         if (state.currentStep === 'DRAWING_AOL') {
             if (state.aolPoints.length > 2) {
-                setStep('DRAWING_FAT');
+                setStep(state.reviewMode ? 'REVIEW' : 'DRAWING_FAT');
             } else {
                 showToast('Draw at least 3 points to define the AOL area.', 'error');
             }
@@ -252,6 +337,9 @@ document.addEventListener('DOMContentLoaded', () => {
             draw();
         } else if (state.currentStep === 'CALIBRATING' && state.scalePoints.length > 0) {
             state.scalePoints.pop();
+            draw();
+        } else if (state.currentStep === 'DRAWING_FAT' && state.fatPoints.length > 0) {
+            state.fatPoints.pop();
             draw();
         }
     }
@@ -285,6 +373,23 @@ document.addEventListener('DOMContentLoaded', () => {
         draw();
         finalImageEl.src = modalCanvas.toDataURL('image/png');
         finalImageEl.style.display = 'block';
+        downloadAnnotatedButton.classList.remove('hidden');
+    }
+
+    function downloadAnnotatedImage() {
+        if (!finalImageEl.src || !finalImageEl.src.startsWith('data:image/png')) {
+            showToast('No annotated image available.', 'error');
+            return;
+        }
+        const a = document.createElement('a');
+        const code = state.analysisMode === 'batch_running'
+            ? `${state.batchCode}${String(state.batchCounter - 1).padStart(2, '0')}`
+            : (animalIdInput.value.trim() || 'echometrics');
+        a.href = finalImageEl.src;
+        a.download = `${code}_annotated.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
     }
 
     function handleModeChange(event) {
@@ -330,10 +435,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateModalInstructions() {
         let title, text;
         confirmStepButton.style.display = 'none';
+        confirmStepButton.textContent = 'Confirm Shape';
         switch (state.currentStep) {
             case 'CALIBRATING':
-                title = 'Step 1 — Calibrate (1 cm)';
-                text  = 'Click on <strong>two points</strong> on the scale bar representing exactly 1 cm.';
+                title = 'Step 1 — Calibrate';
+                text  = 'Use the scale length entered before loading the image, then click <strong>two points</strong> spanning that distance.';
                 break;
             case 'DRAWING_AOL':
                 title = 'Step 2 — Draw AOL';
@@ -343,6 +449,14 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'DRAWING_FAT':
                 title = 'Step 3 — Measure EGS';
                 text  = 'Click <strong>two points</strong> to measure subcutaneous fat thickness.';
+                if (!state.reviewMode && state.fatPoints.length === 2) {
+                    confirmStepButton.textContent = 'Calculate';
+                    confirmStepButton.style.display = 'block';
+                }
+                break;
+            case 'REVIEW':
+                title = 'Review measurements';
+                text = 'Select a tool above. Drag points to adjust; clear a tool to redraw it. Then choose <strong>Recalculate &amp; save</strong> or <strong>Cancel changes</strong>.';
                 break;
             case 'DONE':
                 title = 'Complete!';
@@ -364,10 +478,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function closeModal() {
+        if (state.reviewMode) {
+            cancelReview(); // Escape/X means discard edits, not previous validated measurements.
+            return;
+        }
         modal.style.display = 'none';
-        state.scalePoints = [];
-        state.aolPoints   = [];
-        state.fatPoints   = [];
     }
 
     function updateZoom(newZoom) {
@@ -434,22 +549,39 @@ document.addEventListener('DOMContentLoaded', () => {
         modalCtx.stroke();
     }
 
-    function drawSmoothPolygon(points, color) {
-        if (points.length < 1) return;
-        modalCtx.strokeStyle = color;
-        modalCtx.lineWidth   = 2 / state.zoomLevel;
-        drawPoints(points, 'white', 5);
-        if (points.length > 1) {
-            modalCtx.beginPath();
-            modalCtx.moveTo(points[0].x, points[0].y);
-            for (let i = 0; i < points.length - 1; i++) {
-                const mid = {
-                    x: (points[i].x + points[i + 1].x) / 2,
-                    y: (points[i].y + points[i + 1].y) / 2,
-                };
-                modalCtx.quadraticCurveTo(points[i].x, points[i].y, mid.x, mid.y);
+    // Closed Catmull-Rom curve. Exactly the SAME sample points are used for
+    // drawing and for the server-side area measurement.
+    function sampleAolContour(points, samplesPerSegment = 12) {
+        if (points.length < 3) return points.slice();
+        const output = [], n = points.length;
+        for (let i = 0; i < n; i++) {
+            const p0 = points[(i - 1 + n) % n];
+            const p1 = points[i];
+            const p2 = points[(i + 1) % n];
+            const p3 = points[(i + 2) % n];
+            for (let j = 0; j < samplesPerSegment; j++) {
+                const t = j / samplesPerSegment, t2 = t * t, t3 = t2 * t;
+                const coord = k => 0.5 * (
+                    2 * p1[k] + (-p0[k] + p2[k]) * t +
+                    (2*p0[k] - 5*p1[k] + 4*p2[k] - p3[k]) * t2 +
+                    (-p0[k] + 3*p1[k] - 3*p2[k] + p3[k]) * t3);
+                output.push({ x: coord('x'), y: coord('y') });
             }
-            modalCtx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+        }
+        return output;
+    }
+
+    function drawSmoothPolygon(points, color) {
+        if (!points.length) return;
+        modalCtx.strokeStyle = color;
+        modalCtx.lineWidth = 2 / state.zoomLevel;
+        drawPoints(points, 'white', 5);
+        const sampled = sampleAolContour(points);
+        if (sampled.length > 1) {
+            modalCtx.beginPath();
+            modalCtx.moveTo(sampled[0].x, sampled[0].y);
+            sampled.slice(1).forEach(p => modalCtx.lineTo(p.x, p.y));
+            if (points.length >= 3) modalCtx.closePath();
             modalCtx.stroke();
         }
         if (state.currentStep === 'DRAWING_AOL' && points.length > 0) {
@@ -515,23 +647,82 @@ document.addEventListener('DOMContentLoaded', () => {
         const points = getCurrentPoints();
         if (!points) return;
         if (findPointAt(state.mousePos, points) !== -1) return;
+        if ((state.currentStep === 'CALIBRATING' || state.currentStep === 'DRAWING_FAT') && points.length >= 2) return;
         points.push({ ...state.mousePos });
-        if (state.currentStep === 'CALIBRATING' && points.length === 2) setStep('DRAWING_AOL');
-        else if (state.currentStep === 'DRAWING_FAT' && points.length === 2) calculateResults();
+        if (state.currentStep === 'CALIBRATING' && points.length === 2) {
+            setStep(state.reviewMode ? 'REVIEW' : 'DRAWING_AOL');
+        } else if (state.currentStep === 'DRAWING_FAT' && points.length === 2) {
+            if (state.reviewMode) setStep('REVIEW');
+            else calculateResults();
+        }
         draw();
     }
 
     function onContextMenu(event) { event.preventDefault(); undoLastPoint(); }
 
-    function getPointOnCurve(points, t) {
-        const n = points.length - 1;
-        if (n < 1) return points[0];
-        const i = Math.min(Math.floor(t * n), n - 1);
-        const tSeg = t * n - i;
-        return {
-            x: points[i].x + (points[i + 1].x - points[i].x) * tSeg,
-            y: points[i].y + (points[i + 1].y - points[i].y) * tSeg,
+
+    // ---------- Annotation review (retains the last completed image) ----------
+    function updateMeasurementContext() {
+        const parts = [];
+        const speciesLabel = speciesInput.options[speciesInput.selectedIndex]?.text;
+        if (speciesInput.value) parts.push(`Species: ${speciesLabel}`);
+        if (animalIdInput.value.trim()) parts.push(`Animal: ${animalIdInput.value.trim()}`);
+        if (sessionIdInput.value.trim()) parts.push(`Session: ${sessionIdInput.value.trim()}`);
+        if (bodyConditionInput.value.trim()) parts.push(`BCS: ${bodyConditionInput.value.trim()}`);
+        measurementContext.textContent = parts.join(' · ');
+        measurementContext.classList.toggle('hidden', !parts.length);
+    }
+
+    function clonePoints(points) {
+        return points.map(p => ({x: p.x, y: p.y}));
+    }
+
+    function startReview() {
+        if (!state.image || state.scalePoints.length !== 2 || state.aolPoints.length < 3 || state.fatPoints.length !== 2) {
+            showToast('Complete a measurement before reviewing.', 'error');
+            return;
+        }
+        state.reviewSnapshot = {
+            scalePoints: clonePoints(state.scalePoints),
+            aolPoints: clonePoints(state.aolPoints),
+            fatPoints: clonePoints(state.fatPoints),
+            scaleLength: scaleLengthInput.value,
         };
+        state.reviewMode = true;
+        reviewToolbar.classList.remove('hidden');
+        openModal();
+        setStep('REVIEW');
+    }
+
+    function cancelReview() {
+        if (state.reviewSnapshot) {
+            state.scalePoints = clonePoints(state.reviewSnapshot.scalePoints);
+            state.aolPoints = clonePoints(state.reviewSnapshot.aolPoints);
+            state.fatPoints = clonePoints(state.reviewSnapshot.fatPoints);
+            scaleLengthInput.value = state.reviewSnapshot.scaleLength;
+        }
+        state.reviewMode = false;
+        state.reviewSnapshot = null;
+        reviewToolbar.classList.add('hidden');
+        modal.style.display = 'none';
+        setStep('DONE');
+    }
+
+    function selectReviewTool(step, buttonId) {
+        if (!state.reviewMode) return;
+        setStep(step);
+        reviewToolbar.querySelectorAll('.review-edit-tools button').forEach(btn => {
+            btn.classList.toggle('is-active', btn.id === buttonId);
+        });
+    }
+
+    function clearReviewPoints() {
+        if (!state.reviewMode) return;
+        if (state.currentStep === 'CALIBRATING') state.scalePoints = [];
+        else if (state.currentStep === 'DRAWING_AOL') state.aolPoints = [];
+        else if (state.currentStep === 'DRAWING_FAT') state.fatPoints = [];
+        else showToast('Select scale, AOL or EGS before clearing points.', 'info');
+        draw();
     }
 
     // -----------------------------------------------------------------------
@@ -567,6 +758,14 @@ document.addEventListener('DOMContentLoaded', () => {
     startBatchButton.addEventListener('click', startBatch);
     document.addEventListener('keydown', onKeyDown);
     if (downloadExcelButton) downloadExcelButton.addEventListener('click', downloadExcel);
+    downloadAnnotatedButton.addEventListener('click', downloadAnnotatedImage);
+    reviewButton.addEventListener('click', startReview);
+    reviewSave.addEventListener('click', calculateResults);
+    reviewCancel.addEventListener('click', cancelReview);
+    document.getElementById('reviewEditScale').addEventListener('click', () => selectReviewTool('CALIBRATING', 'reviewEditScale'));
+    document.getElementById('reviewEditAol').addEventListener('click', () => selectReviewTool('DRAWING_AOL', 'reviewEditAol'));
+    document.getElementById('reviewEditFat').addEventListener('click', () => selectReviewTool('DRAWING_FAT', 'reviewEditFat'));
+    document.getElementById('reviewClearPoints').addEventListener('click', clearReviewPoints);
 
     // -----------------------------------------------------------------------
     // Init

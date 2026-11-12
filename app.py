@@ -15,6 +15,9 @@ Deploy (Render / production):
 import io
 import os
 import uuid
+import math
+import time
+import threading
 
 import cv2
 import numpy as np
@@ -32,9 +35,38 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 app.config["DEBUG"] = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
 
-# In-memory image store: {token: bytes}
-# Images live only for the duration of one analysis session.
-_image_store: dict[str, bytes] = {}
+# Transient image cache: token -> (bytes, last_access_monotonic).
+# Automatic cleanup avoids unbounded RAM use if a browser disconnects.
+IMAGE_TTL_SECONDS = 30 * 60
+MAX_IMAGE_CACHE_BYTES = 80 * 1024 * 1024
+_image_store: dict[str, tuple[bytes, float]] = {}
+_image_lock = threading.Lock()
+
+
+def _cleanup_image_store(now: float) -> None:
+    """Call with _image_lock held."""
+    expired = [key for key, (_, ts) in _image_store.items()
+               if now - ts > IMAGE_TTL_SECONDS]
+    for key in expired:
+        del _image_store[key]
+
+
+def _finite_point(obj: dict) -> tuple[float, float]:
+    if not isinstance(obj, dict):
+        raise ValueError('A coordinate must be an object')
+    x, y = float(obj['x']), float(obj['y'])
+    if not (math.isfinite(x) and math.isfinite(y)):
+        raise ValueError('Coordinates must be finite')
+    if abs(x) > 1_000_000 or abs(y) > 1_000_000:
+        raise ValueError('Coordinates exceed the supported range')
+    return x, y
+
+
+def _two_points(data: dict, key: str) -> tuple[tuple[float, float], tuple[float, float]]:
+    points = data[key]
+    if not isinstance(points, list) or len(points) != 2:
+        raise ValueError(f'{key} needs two points')
+    return _finite_point(points[0]), _finite_point(points[1])
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +109,32 @@ def upload_file():
     if not allowed_file(file.filename):
         return jsonify({"error": "File type not allowed"}), 400
 
+    raw = file.read()
+    if not raw:
+        return jsonify({"error": "Empty image"}), 400
+    # Validate decoding (reject mismatched extensions / corrupt content).
+    extension = file.filename.rsplit('.', 1)[-1].lower()
+    if extension == 'gif':
+        if len(raw) < 10 or raw[:6] not in (b'GIF87a', b'GIF89a'):
+            return jsonify({"error": "Invalid GIF image"}), 400
+        width = int.from_bytes(raw[6:8], 'little')
+        height = int.from_bytes(raw[8:10], 'little')
+    else:
+        decoded = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+        if decoded is None or decoded.ndim < 2:
+            return jsonify({"error": "Invalid or unsupported image"}), 400
+        height, width = decoded.shape[:2]
+    if width <= 0 or height <= 0 or width * height > 12_000_000:
+        return jsonify({"error": "Image dimensions invalid or too large"}), 400
+
     token = uuid.uuid4().hex
-    _image_store[token] = file.read()
+    with _image_lock:
+        now = time.monotonic()
+        _cleanup_image_store(now)
+        used = sum(len(item[0]) for item in _image_store.values())
+        if used + len(raw) > MAX_IMAGE_CACHE_BYTES:
+            return jsonify({"error": "Temporary image memory full; finish the current analysis and retry"}), 503
+        _image_store[token] = (raw, now)
 
     return jsonify({
         "token": token,
@@ -89,9 +145,15 @@ def upload_file():
 @app.route("/image/<token>")
 def serve_image(token: str):
     """Serves a previously uploaded image from the in-memory store."""
-    data = _image_store.get(token)
-    if not data:
+    with _image_lock:
+        now = time.monotonic()
+        _cleanup_image_store(now)
+        item = _image_store.get(token)
+        if item is not None:
+            _image_store[token] = (item[0], now)
+    if item is None:
         return "Not found", 404
+    data = item[0]
     mime = "image/jpeg"
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         mime = "image/png"
@@ -105,7 +167,8 @@ def serve_image(token: str):
 @app.route("/discard/<token>", methods=["POST"])
 def discard_image(token: str):
     """Frees an image from memory once analysis is complete."""
-    _image_store.pop(token, None)
+    with _image_lock:
+        _image_store.pop(token, None)
     return jsonify({"ok": True})
 
 
@@ -123,35 +186,44 @@ def calculate():
         return jsonify({"error": "Invalid JSON payload"}), 400
 
     try:
-        p1s, p2s = data["scalePoints"][0], data["scalePoints"][1]
-        dist_px = float(np.sqrt(
-            (p1s["x"] - p2s["x"]) ** 2 + (p1s["y"] - p2s["y"]) ** 2
-        ))
+        p1s, p2s = _two_points(data, "scalePoints")
+        dist_px = math.dist(p1s, p2s)
         if dist_px < 1:
             return jsonify({"error": "Calibration points are too close together"}), 400
 
-        pixels_per_cm = dist_px  # scale bar represents exactly 1 cm
+        scale_cm = float(data.get("scaleLengthCm", 1.0))
+        if not math.isfinite(scale_cm) or scale_cm <= 0 or scale_cm > 1000:
+            return jsonify({"error": "Calibration length must be a positive finite number"}), 400
+        pixels_per_cm = dist_px / scale_cm
 
-        aol_pts = np.array(
-            [[p["x"], p["y"]] for p in data["aolPoints"]], dtype=np.int32
-        )
-        aol_cm2 = cv2.contourArea(aol_pts) / (pixels_per_cm ** 2)
+        points = data["aolPoints"]
+        if not isinstance(points, list) or len(points) < 3 or len(points) > 20_000:
+            return jsonify({"error": "AOL contour needs between 3 and 20000 points"}), 400
+        # float32 preserves subpixel coordinates (int32 truncated them).
+        aol_pts = np.asarray([_finite_point(p) for p in points], dtype=np.float32)
+        area_px = float(cv2.contourArea(aol_pts))
+        if not math.isfinite(area_px) or area_px <= 0:
+            return jsonify({"error": "AOL contour is degenerate"}), 400
+        aol_cm2 = area_px / (pixels_per_cm ** 2)
 
-        p1f, p2f = data["fatPoints"][0], data["fatPoints"][1]
-        fat_cm = float(np.sqrt(
-            (p1f["x"] - p2f["x"]) ** 2 + (p1f["y"] - p2f["y"]) ** 2
-        )) / pixels_per_cm
+        p1f, p2f = _two_points(data, "fatPoints")
+        fat_cm = math.dist(p1f, p2f) / pixels_per_cm
+        if not (math.isfinite(aol_cm2) and math.isfinite(fat_cm)):
+            return jsonify({"error": "Non-finite result"}), 400
 
         return jsonify({
-            "aol_cm2": round(aol_cm2, 2),
-            "fat_thickness_cm": round(fat_cm, 2),
-            "pixels_per_cm": round(pixels_per_cm, 2),
+            "aol_cm2": round(aol_cm2, 3),
+            "fat_thickness_cm": round(fat_cm, 3),
+            "fat_thickness_mm": round(fat_cm * 10, 2),
+            "pixels_per_cm": round(pixels_per_cm, 3),
+            "scale_length_cm": scale_cm,
         })
 
-    except (KeyError, IndexError, TypeError) as exc:
-        return jsonify({"error": f"Missing or malformed data: {exc}"}), 400
-    except Exception as exc:
-        return jsonify({"error": f"Calculation error: {exc}"}), 500
+    except (KeyError, IndexError, TypeError, ValueError, OverflowError) as exc:
+        return jsonify({"error": f"Invalid measurement data: {exc}"}), 400
+    except Exception:
+        app.logger.exception('Unexpected error during measurement')
+        return jsonify({"error": "Unexpected calculation error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -182,14 +254,38 @@ def download_excel():
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Results"
-        ws.append(["Image", "AOL (cm²)", "EGS (cm)"])
+        if not isinstance(data['rows'], list) or len(data['rows']) > 10000:
+            return jsonify({"error": "Invalid row count for Excel export"}), 400
+        def excel_text(value):
+            text = str(value or '')[:255]
+            return "'" + text if text.startswith(('=', '+', '-', '@')) else text
 
+        ws.append(["Animal ID", "Session ID", "Image", "Original filename", "AOL (cm²)", "EGS (cm)",
+                   "EGS (mm)", "Calibration (px/cm)", "Scale length (cm)",
+                   "Species", "Body condition score"])
         for row in data["rows"]:
+            aol = float(row["aol"])
+            egs = float(row["egs"])
+            if not (math.isfinite(aol) and math.isfinite(egs)):
+                raise ValueError('Non-finite measurement in export')
             ws.append([
-                str(row.get("imageCode", "")),
-                float(row.get("aol", 0)),
-                float(row.get("egs", 0)),
+                excel_text(row.get("animalId", "")),
+                excel_text(row.get("sessionId", "")),
+                excel_text(row.get("imageCode", "")),
+                excel_text(row.get("originalFilename", "")),
+                aol,
+                egs,
+                round(egs * 10, 3),
+                float(row.get("pixelsPerCm", 0)) or None,
+                float(row.get("scaleLengthCm", 0)) or None,
+                excel_text(row.get("species", "")),
+                excel_text(row.get("bodyCondition", "")),
             ])
+        ws.freeze_panes = 'A2'
+        ws.auto_filter.ref = ws.dimensions
+        for col, width in {'A': 22, 'B': 22, 'C': 20, 'D': 30, 'E': 16,
+                           'F': 16, 'G': 16, 'H': 26, 'I': 22, 'J': 20, 'K': 24}.items():
+            ws.column_dimensions[col].width = width
 
         buf = io.BytesIO()
         wb.save(buf)
