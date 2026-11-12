@@ -1,5 +1,5 @@
 """
-EchoMetrics — Carcass Ultrasound Analyzer
+LambdaMorph — Scientific Ultrasound Image Analysis
 Flask backend — stateless design (no files persisted on server).
 
 Images are processed in memory and discarded immediately.

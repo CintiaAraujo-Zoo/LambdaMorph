@@ -1,4 +1,4 @@
-/* EchoMetrics 2.0 | Milestone 2 — Scientific workspace UI
+/* LambdaMorph 2.0 | Milestone 2 — Scientific workspace UI
    Presentation layer only. Does not change measurement calculations. */
 :root {
   --primary-color: #176f78;
@@ -217,7 +217,7 @@ footer a:hover { text-decoration: underline; }
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 
-/* EchoMetrics 2.1 - annotation review */
+/* LambdaMorph 2.1 - annotation review */
 .metadata-fields select {
   box-sizing: border-box; width:100%; margin:0 0 9px; padding:10px 11px;
   height:42px; border:1px solid #d8e4e6; border-radius:9px;
@@ -244,7 +244,7 @@ footer a:hover { text-decoration: underline; }
 .review-decision-tools {width:100%;}
 .review-decision-tools .btn {flex:1 0 auto;}}
 
-/* EchoMetrics 2.2 ROI drawing toolbar */
+/* LambdaMorph 2.2 ROI drawing toolbar */
 .aol-tool-panel {display:flex;flex-wrap:wrap;align-items:center;gap:9px 14px;
   padding:12px 14px 6px;border:1px solid #dce9e7;background:#f7fbfa;
   border-radius:11px;margin-top:10px;color:#294953}
@@ -260,7 +260,7 @@ footer a:hover { text-decoration: underline; }
 @media(max-width:650px){.aol-tool-panel{align-items:stretch;}
  .aol-tool-options,.aol-tool-actions{justify-content:flex-start}}
 
-/* EchoMetrics 2.3 — optional additional morphometry */
+/* LambdaMorph 2.3 — optional additional morphometry */
 .morphometry-options {border-top:1px solid var(--border-color,#dfe6e7); padding:15px 0; display:grid;gap:7px}
 .morphometry-options label {font-weight:600;font-size:.85rem}
 .morphometry-options select, #reviewFatSelect {min-height:38px;border:1px solid #cbdcdd;border-radius:8px;background:#fff;color:#23454b;padding:7px 10px}

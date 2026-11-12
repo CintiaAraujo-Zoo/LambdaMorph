@@ -1,10 +1,10 @@
-/* EchoMetrics 2.4 — reversible theme and UI localization layer.
+/* LambdaMorph 2.4 — reversible theme and UI localization layer.
    No measurement state, coordinates, calculations or image pixels are changed. */
 (() => {
   'use strict';
   const prefKey = 'echometrics.preferences.v24';
   const exact = {
-    'Carcass Ultrasound Analyzer': 'Analisador de ultrassonografia de carcaça',
+    'Scientific Ultrasound Image Analysis': 'Análise científica de imagens ultrassonográficas',
     'Source code': 'Código-fonte', 'Measurement workspace': 'Área de mensuração',
     'Ultrasound image analysis': 'Análise de imagens ultrassonográficas',
     'Calibrate, measure and export reproducible results.': 'Calibre, mensure e exporte resultados reprodutíveis.',

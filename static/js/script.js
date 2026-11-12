@@ -1,8 +1,8 @@
-/* EchoMetrics 2.3 - repeat EGS / perimeter / muscle depth */
-/* EchoMetrics 2.2 - ROI drawing tools */
-/* EchoMetrics 2.1 - annotation review */
+/* LambdaMorph 2.3 - repeat EGS / perimeter / muscle depth */
+/* LambdaMorph 2.2 - ROI drawing tools */
+/* LambdaMorph 2.1 - annotation review */
 /**
- * EchoMetrics — client-side analysis logic
+ * LambdaMorph — client-side analysis logic
  *
  * Architecture: stateless backend.
  * - Uploaded images are stored in server memory with a token and discarded after use.
@@ -452,7 +452,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const a = document.createElement('a');
         const code = state.analysisMode === 'batch_running'
             ? `${state.batchCode}${String(state.batchCounter - 1).padStart(2, '0')}`
-            : (animalIdInput.value.trim() || 'echometrics');
+            : (animalIdInput.value.trim() || 'lambdamorph');
         a.href = finalImageEl.src;
         a.download = `${code}_annotated.png`;
         document.body.appendChild(a);
@@ -823,7 +823,7 @@ document.addEventListener('DOMContentLoaded', () => {
         undoLastPoint();
     }
 
-    // -------- EchoMetrics 2.2: editable freehand/polygon ROI controller --------
+    // -------- LambdaMorph 2.2: editable freehand/polygon ROI controller --------
     function aolPoint(pos) {
         return {
             x: Math.max(0, Math.min(state.image.width - 1, pos.x)),
@@ -989,7 +989,7 @@ document.addEventListener('DOMContentLoaded', () => {
         draw();
     }
 
-    // ---------- EchoMetrics 2.3 morphometric measurement controls ----------
+    // ---------- LambdaMorph 2.3 morphometric measurement controls ----------
     function selectFatLine(index) {
         const i = Number(index);
         if (!Number.isInteger(i) || i < 0 || i >= state.fatLines.length) return;

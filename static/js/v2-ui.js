@@ -1,4 +1,4 @@
-/** EchoMetrics 2.0 visual enhancements. No changes to measurement logic. */
+/** LambdaMorph 2.0 visual enhancements. No changes to measurement logic. */
 document.addEventListener('DOMContentLoaded', () => {
   'use strict';
   const imageInput = document.getElementById('imageLoader');

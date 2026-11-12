@@ -1,148 +1,126 @@
-# EchoMetrics
+# LambdaMorph
 
-**Interactive B-mode ultrasound measurements for livestock research**
+**Scientific ultrasound image analysis for livestock research**
 
-EchoMetrics is an open-source web application for manually annotating B-mode ultrasound images and calculating the **longissimus dorsi cross-sectional area** (AOL/REA) and **subcutaneous fat thickness** (EGS/BFT). It is intended to support research workflows involving sheep, cattle, goats, and other livestock species.
+**LambdaMorph** (formerly **EchoMetrics**) is an open-source, browser-based application developed within **LAMBDA at Universidade Estadual do Piauí (UESPI)** for manually annotating B-mode ultrasound images and extracting morphometric measurements in animal science. It supports research workflows involving sheep, cattle, goats, and other livestock.
 
-The application runs in a web browser. Researchers can use the hosted version or run the Python/Flask application locally.
+> **Research status:** Version 2.4 is under development. Automated software tests do not establish anatomical accuracy, repeatability, or agreement with a reference method. Operators should follow a defined acquisition/annotation protocol and validate the software for its intended research use.
 
-> **Research status:** Version 2.1 is under active development. Passing software tests does not establish anatomical accuracy, measurement repeatability, or agreement with reference methods. Measurements should be reviewed by a trained operator and validated for each intended research protocol.
+## Try the application
 
-## Try EchoMetrics
-
-| Environment | Link | Notes |
+| Environment | URL | Status |
 | --- | --- | --- |
-| Stable/original version (`main`) | [Open EchoMetrics](https://echometrics-m33u.onrender.com/) | Current production deployment |
-| Development version (`develop-v2`) | [Open EchoMetrics 2.1](https://echometrics-v2-dev.onrender.com/) | Features undergoing user testing |
-| Source code | [GitHub repository](https://github.com/CintiaAraujo-Zoo/EchoMetrics) | MIT licensed |
+| Legacy original (`main`) | [EchoMetrics (original)](https://echometrics-m33u.onrender.com/) | Older public deployment; retained during migration |
+| Current development (`develop-v2`) | [LambdaMorph 2.4 (development)](https://echometrics-v2-dev.onrender.com/) | Tested development build; URL remains unchanged for now |
+| Source code | [LambdaMorph on GitHub](https://github.com/CintiaAraujo-Zoo/LambdaMorph) | MIT licensed |
 
-The development deployment uses Render's free service configuration and may take extra time to respond after a period of inactivity.
+The free Render service may be slow to respond after inactivity. The old deployment URLs will be reconsidered after confirming the identity migration.
 
-## Features in development version 2.1
+## Features (development 2.4)
 
-- **Interactive annotation:** define an AOL contour and an EGS line by selecting and adjusting image points.
-- **Flexible calibration:** specify the actual reference length in centimeters and mark its two endpoints on the image.
-- **Review and edit:** reopen the most recent analysis, change scale/AOL/EGS points, cancel edits, or recalculate and save.
-- **Individual and batch workflows:** analyze an image or accumulate measurements for an exportable batch.
-- **Research metadata:** record animal ID, session ID, species, body condition score, original filename, and calibration information.
-- **Exports:** download an annotated PNG and export batch results to an Excel workbook (`.xlsx`).
-- **Browser-based interface:** guided measurement steps, zoom controls, and a responsive layout.
+- **Interactive ROI tools:** freehand drawing, polygon marking and editable points for the longissimus muscle area (AOL / REA).
+- **Flexible calibration:** measure a known image reference length to convert pixels to centimeters.
+- **Repeated subcutaneous fat thickness (EGS / BFT):** 1–3 manually positioned lines, individual values, mean and *sample* standard deviation.
+- **Muscle perimeter:** derived from the same contour used for the calculated AOL.
+- **Optional muscle depth:** a separately annotated two-point distance, subject to a consistent anatomical definition.
+- **Review and edit:** reopen the most recent analysis, adjust markings, undo revisions or recalculate.
+- **Single-image and batch workflows:** analyze individual images or accumulate batch results.
+- **Research metadata:** animal ID, session ID, species, body condition score, original filename and calibration information.
+- **Exports:** annotated PNG and Excel workbook (`.xlsx`) including measurements and metadata in batch mode.
+- **Appearance and language:** light/dark theme and English/Brazilian Portuguese interface. Some dynamic messages or exported labels may remain in English.
 
-**Supported upload formats:** PNG, JPEG, BMP, and GIF; maximum file size: 20 MB. Animated GIFs and image formats should be tested before using them in a scientific dataset.
+**Supported uploads:** PNG, JPEG, BMP and GIF; up to 20 MB per file. Animated images and unusual encodings require additional quality checks.
 
 ## Measurement workflow
 
-1. **Import:** upload an ultrasound image and optionally enter the animal, session, species, and body condition information.
-2. **Calibrate:** enter the known reference length (cm), then select its endpoints on the image scale. Confirm that the scale is valid for the image region being measured.
-3. **Outline AOL:** trace the anatomical border of the *longissimus dorsi* muscle using adjustable points.
-4. **Measure EGS:** select the two anatomical interfaces defining subcutaneous fat thickness for your protocol.
-5. **Review:** inspect the annotated image and measurements; reopen and modify the annotations if necessary.
-6. **Export:** save an annotated image and, in batch mode, download results and metadata in Excel format.
+1. Import an ultrasound image and supply optional research metadata.
+2. Calibrate using two endpoints a known distance apart in the image.
+3. Trace the longissimus muscle border using **Freehand** or **Polygon**, then refine it using **Edit points**.
+4. Mark one, two or three EGS lines according to the experimental protocol.
+5. Optionally mark muscle depth with its own two endpoints.
+6. Review the contours and measurements; correct any erroneous markings.
+7. Export the annotated image and, for a batch, the Excel workbook.
 
-## How the measurements are calculated
+## Measurement formulas
 
-For two calibration points separated by `d_scale_px` pixels and a known reference length `L_scale_cm`:
+For a calibration distance of `d_scale_px` pixels representing `L_scale_cm` centimeters:
 
 ```text
 pixels_per_cm = d_scale_px / L_scale_cm
-AOL_cm2       = AOL_area_px2 / (pixels_per_cm ** 2)
-EGS_cm        = d_fat_px / pixels_per_cm
-EGS_mm        = EGS_cm * 10
+AOL_cm2       = area_px2 / pixels_per_cm**2
+perimeter_cm  = closed_contour_length_px / pixels_per_cm
+EGS_i_cm      = two_point_distance_i_px / pixels_per_cm
+EGS_mean_cm   = mean(EGS_i_cm)
+EGS_sd_cm     = sample_standard_deviation(EGS_i_cm)  # 0 displayed for n=1
+muscle_depth_cm = two_point_depth_distance_px / pixels_per_cm  # if marked
 ```
 
-AOL area is obtained from the annotated closed contour in image coordinates; EGS is the Euclidean distance between the selected fat-thickness endpoints. These formulas depend on **correct calibration and anatomical annotation**. The software does not currently perform automatic segmentation or determine whether a selected anatomical border is correct.
+The AOL and perimeter are calculated from the annotated closed contour. The geometry **does not identify anatomical landmarks automatically**. The EGS summary is descriptive; repeated lines at different anatomical locations are not interchangeable with repeated readings at a single site. Define locations, operators, image orientation and quality-control rules before data collection.
 
-## Install locally
+## Run locally
 
-**Recommended environment:** Python 3.11.
+Recommended: Python 3.11.
 
 ```bash
-git clone https://github.com/CintiaAraujo-Zoo/EchoMetrics.git
-cd EchoMetrics
+git clone https://github.com/CintiaAraujo-Zoo/LambdaMorph.git
+cd LambdaMorph
 git switch develop-v2
 python -m venv .venv
 ```
 
-**Windows (PowerShell):**
+Windows PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe app.py
 ```
 
-**macOS/Linux:**
+macOS / Linux:
 
 ```bash
 ./.venv/bin/python -m pip install -r requirements.txt
 ./.venv/bin/python app.py
 ```
 
-Open **http://127.0.0.1:5000** in your browser. To test the original released branch instead, switch to `main` before installation.
+Open **http://127.0.0.1:5000** in your browser.
 
-## Automated tests
-
-From the project root, run:
+## Automated software tests
 
 ```powershell
-# Windows
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-```bash
-# macOS / Linux
-./.venv/bin/python -m unittest discover -s tests -v
-```
+These tests cover selected backend calculations, exports, input validation, interface wiring and branding. They **do not** replace a repeatability or agreement study against trained experts or reference measurements.
 
-The development branch includes tests for calculation input validation, calibration, file handling, Excel export, and the presence of review controls and research metadata. These are **software checks**, not an experimental validation study. Future validation should include intra-/inter-observer repeatability and comparison against a suitable reference method.
+## Data handling and limitations
 
-## Data handling and research limitations
+Uploaded images are processed from temporary server memory; the application does not currently provide durable hosted storage. Local archives of original images, annotated PNGs, calibration details and exported workbooks remain the researcher's responsibility. For sensitive data, verify that uploading to a third-party hosted service is permitted or use the software locally.
 
-- Uploaded images are temporarily held **in server memory** for processing and served using a generated token; the current application does not write them to permanent server storage. Tokens are discarded during normal workflows, and the backend includes cleanup logic.
-- Batch results are held during the browser session and exported on demand. Do not use the application as your sole archive of raw images or completed measurements.
-- Keep the **original image**, **annotation export**, **calibration reference**, **animal/session metadata**, and **analysis workbook** together in your research records.
-- The tool does not replace operator training, anatomical quality control, or a formal method-validation study.
-- Before uploading sensitive research images to any hosted service, ensure your data-sharing rules permit the upload. Running locally may be preferable for restricted datasets.
+See the source code for current validation constraints and output fields. Automatic anatomical segmentation and longitudinal session recovery are not implemented.
 
-## Project structure
+## Development and deployment
 
-```text
-EchoMetrics/
-├── app.py                     # Flask routes, measurements, and export
-├── requirements.txt           # Python dependencies
-├── render.yaml                # Render deployment configuration
-├── templates/
-│   └── index.html             # Web interface
-├── static/
-│   ├── css/
-│   │   ├── style.css
-│   │   └── v2-ui.css
-│   └── js/
-│       ├── script.js
-│       └── v2-ui.js
-├── tests/                     # Automated checks (develop-v2)
-├── LICENSE
-└── README.md
-```
+Development occurs on `develop-v2`; the older `main` branch is currently preserved as a legacy/original version. The `render.yaml` file still contains the old service name for backward compatibility during migration. Actual Render service settings should be checked before changing its deployment name or URL.
 
-## Roadmap
+### Roadmap
 
-- Improve session persistence and resuming interrupted batch work.
-- Add more comprehensive measurement traceability and export of annotation coordinates.
-- Evaluate repeatability and agreement against expert/reference measurements.
-- Explore assisted segmentation **only after** obtaining validated reference annotations.
+- Persist and resume analysis sessions without relying exclusively on browser memory.
+- Save reproducible ROI coordinates and calibration metadata in a portable project format.
+- Perform repeatability, observer agreement and reference-method validation.
+- Explore assisted segmentation after establishing validated reference annotations.
 
-Roadmap items are proposals, **not current features**.
+Roadmap items are proposed work, not released features.
 
 ## Citation
 
-If using EchoMetrics in research, cite the software repository and identify the **version or commit** used for analysis. Until a versioned release or DOI is available, a suggested reference is:
+For research manuscripts, cite the **exact software version or Git commit** used. Until a formal release and DOI exist, a suggested provisional reference is:
 
-> Araujo, C. M. (2026). *EchoMetrics: Interactive B-mode ultrasound measurements for livestock research* [Computer software]. GitHub. https://github.com/CintiaAraujo-Zoo/EchoMetrics
+> Araujo, C. M. (2026). *LambdaMorph: Scientific ultrasound image analysis for livestock research* [Computer software]. GitHub. https://github.com/CintiaAraujo-Zoo/LambdaMorph
 
-For reproducibility, also report the software version/commit, image acquisition protocol, calibration procedure, and annotation method in the manuscript.
+Also report the scanner/probe, acquisition plane, reference scale, anatomical rules, annotation mode and software commit in the methods section.
 
-## Author and license
+## Author, affiliation and license
 
-**Cintia M. Araujo** — Universidade Estadual do Piauí (UESPI), Brazil.
+Developed by **Cintia M. Araujo** within **LAMBDA — Universidade Estadual do Piauí (UESPI)**, Brazil.
 
-Licensed under the [MIT License](LICENSE). Contributions and issue reports are welcome through the repository's GitHub interface.
+Licensed under the [MIT License](LICENSE). Contributions and issues are welcome through the repository.
