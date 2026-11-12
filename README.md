@@ -1,5 +1,7 @@
 # LambdaMorph
 
+![LambdaMorph — LAMBDA/UESPI](static/img/lambdamorph/logo-completo-aprovado.jpg)
+
 **Scientific ultrasound image analysis for livestock research**
 
 **LambdaMorph** (formerly **EchoMetrics**) is an open-source, browser-based application developed within **LAMBDA at Universidade Estadual do Piauí (UESPI)** for manually annotating B-mode ultrasound images and extracting morphometric measurements in animal science. It supports research workflows involving sheep, cattle, goats, and other livestock.
