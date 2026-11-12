@@ -1,0 +1,61 @@
+/* LambdaMorph visual identity 2.4: presentation only. */
+/* Loaded after the 2.4 theme stylesheet; does not affect annotation canvases. */
+header.app-header .brand-block h1 {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  line-height: 1.12;
+}
+header.app-header .brand-block .logo-lambdamorph {
+  display: block;
+  width: 70px;
+  height: 70px;
+  max-width: none;
+  flex: 0 0 70px;
+  object-fit: contain;
+}
+header.app-header .brand-block p {
+  margin: 2px 0 0 82px;
+}
+/* Maintain the existing color-system, including the selected dark theme. */
+@media (max-width: 740px) {
+  header.app-header .brand-block .logo-lambdamorph {
+    width: 54px;
+    height: 54px;
+    flex-basis: 54px;
+  }
+  header.app-header .brand-block h1 { gap: 8px; }
+  header.app-header .brand-block p { margin: 3px 0 0 62px; }
+}
+@media (max-width: 430px) {
+  header.app-header .brand-block p { margin-left: 0; }
+}
+/* LambdaMorph 2.4 — refined header mark, v1 (appearance only).
+   The square PNG has transparent padding. These rules reveal a larger mark
+   within a similar header height, without touching measurement canvases. */
+header.app-header .brand-block .logo-lambdamorph {
+  width: 92px;
+  height: 70px;
+  flex: 0 0 92px;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 10px;
+}
+header.app-header .brand-block p { margin-left: 104px; }
+/* Lighter teal/blue only for the icon on the dark theme; never invert ultrasound images. */
+html[data-theme="dark"] header.app-header .brand-block .logo-lambdamorph {
+  filter: brightness(1.58) saturate(1.12) drop-shadow(0 0 1px rgba(126, 226, 225, 0.34));
+  background: rgba(128, 218, 216, 0.055);
+}
+@media (max-width: 740px) {
+  header.app-header .brand-block .logo-lambdamorph {
+    width: 70px;
+    height: 56px;
+    flex-basis: 70px;
+  }
+  header.app-header .brand-block p { margin-left: 78px; }
+}
+@media (max-width: 430px) {
+  header.app-header .brand-block p { margin-left: 0; }
+}
+/* END LambdaMorph refined header mark, v1 */

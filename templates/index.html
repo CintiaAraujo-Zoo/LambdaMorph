@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/lambdamorph/favicon-32.png') }}">
+    <link rel="icon" type="image/png" sizes="48x48" href="{{ url_for('static', filename='img/lambdamorph/favicon-48.png') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='img/lambdamorph/favicon-180.png') }}">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LambdaMorph 2.4 — Scientific Ultrasound Image Analysis</title>
@@ -12,6 +15,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/v2-ui.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/theme-v24.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/brand-v24.css') }}">
 </head>
 <body>
     <div id="toast-container"></div>
@@ -20,11 +24,9 @@
         <header class="app-header">
             <div class="brand-block">
             <h1>
-                <svg class="logo" viewBox="0 0 130 50" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M 10 25 C 20 5, 30 45, 40 25 C 50 5, 60 45, 70 25" fill="none" stroke="var(--primary-color)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M 70 25 L 85 25 L 85 10" fill="none" stroke="var(--secondary-color)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <circle cx="85" cy="10" r="4" fill="var(--danger-color)"/>
-                </svg>
+                <img class="logo logo-lambdamorph"
+                     src="{{ url_for('static', filename='img/lambdamorph/mark.png') }}"
+                     width="70" height="70" alt="" aria-hidden="true">
                 LambdaMorph
             </h1>
             <p>Scientific Ultrasound Image Analysis</p>
