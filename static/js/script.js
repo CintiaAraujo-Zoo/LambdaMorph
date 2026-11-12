@@ -1,3 +1,5 @@
+/* EchoMetrics 2.3 - repeat EGS / perimeter / muscle depth */
+/* EchoMetrics 2.2 - ROI drawing tools */
 /* EchoMetrics 2.1 - annotation review */
 /**
  * EchoMetrics — client-side analysis logic
@@ -45,6 +47,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const reviewToolbar = document.getElementById('reviewToolbar');
     const reviewSave = document.getElementById('reviewSave');
     const reviewCancel = document.getElementById('reviewCancel');
+    const fatCountInput = document.getElementById('fatMeasurementCount');
+    const reviewFatSelect = document.getElementById('reviewFatSelect');
+    const reviewEditDepth = document.getElementById('reviewEditDepth');
+    const egsStepInfo = document.getElementById('egsStepInfo');
+    const skipDepthButton = document.getElementById('skipDepthButton');
+    const perimeterResultEl = document.getElementById('perimeterResult');
+    const depthResultEl = document.getElementById('depthResult');
+    const fatSummaryResultEl = document.getElementById('fatSummaryResult');
+    const fatRepetitionsResultEl = document.getElementById('fatRepetitionsResult');
+    const aolToolPanel = document.getElementById('aolToolPanel');
+    const aolToolHelp = document.getElementById('aolToolHelp');
+    const aolUndoButton = document.getElementById('aolUndo');
+    const aolRedoButton = document.getElementById('aolRedo');
+    const aolClearButton = document.getElementById('aolClear');
 
     // Modal
     const modal               = document.getElementById('modal');
@@ -74,7 +90,15 @@ document.addEventListener('DOMContentLoaded', () => {
             token            : null,      // server-side image token
             scalePoints      : [],
             aolPoints        : [],
-            fatPoints        : [],
+            fatPoints        : [], // reference to currently selected fat line
+            fatLines         : [[]],
+            fatTarget        : 3,
+            activeFatIndex   : 0,
+            depthPoints      : [],
+            aolTool          : 'freehand',
+            aolStrokeActive  : false,
+            aolUndo          : [],
+            aolRedo          : [],
             isDragging       : false,
             draggedPointIndex: -1,
             hoverPointIndex  : -1,
@@ -128,6 +152,10 @@ document.addEventListener('DOMContentLoaded', () => {
         aolResultEl.textContent          = '-- cm²';
         fatResultEl.textContent          = '-- cm';
         calibrationResultEl.textContent  = '-- px/cm';
+        perimeterResultEl.textContent = '-- cm';
+        depthResultEl.textContent = '-- cm';
+        fatSummaryResultEl.textContent = '--';
+        fatRepetitionsResultEl.textContent = '';
         updateMainInstructions();
         closeModal();
     }
@@ -151,7 +179,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     // A new image always begins with a fresh set of annotations.
                     state.scalePoints = [];
                     state.aolPoints = [];
-                    state.fatPoints = [];
+                    state.fatTarget = Number(fatCountInput.value) || 3;
+                    state.fatLines = Array.from({length: state.fatTarget}, () => []);
+                    state.activeFatIndex = 0;
+                    state.fatPoints = state.fatLines[0];
+                    state.depthPoints = [];
+                    state.aolTool = 'freehand';
+                    state.aolStrokeActive = false;
+                    state.aolUndo = [];
+                    state.aolRedo = [];
                     state.reviewMode = false;
                     state.reviewSnapshot = null;
                     state.lastBatchIndex = null;
@@ -172,8 +208,14 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('Enter a valid positive calibration distance in cm.', 'error');
             return;
         }
-        if (state.scalePoints.length !== 2 || state.aolPoints.length < 3 || state.fatPoints.length !== 2) {
+        if (state.scalePoints.length !== 2 || state.aolPoints.length < 3 ||
+            state.fatLines.length !== state.fatTarget ||
+            !state.fatLines.every(line => line.length === 2)) {
             showToast('Complete scale, AOL and EGS markings before saving.', 'error');
+            return;
+        }
+        if (EchoROI.selfIntersects(state.aolPoints)) {
+            showToast('AOL contour self-intersects. Correct the crossing with Edit points.', 'error');
             return;
         }
         const wasReview = Boolean(state.reviewMode);
@@ -189,7 +231,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 scalePoints: state.scalePoints,
                 scaleLengthCm,
                 aolPoints: highResAol,
-                fatPoints: state.fatPoints,
+                fatPoints: state.fatLines[0],
+                fatMeasurements: state.fatLines,
+                depthPoints: state.depthPoints.length === 2 ? state.depthPoints : null,
             }),
         })
         .then(async response => {
@@ -201,12 +245,22 @@ document.addEventListener('DOMContentLoaded', () => {
             aolResultEl.textContent = `${results.aol_cm2} cm²`;
             fatResultEl.textContent = `${results.fat_thickness_cm} cm`;
             calibrationResultEl.textContent = `${results.pixels_per_cm} px/cm`;
+            perimeterResultEl.textContent = `${results.aol_perimeter_cm} cm`;
+            depthResultEl.textContent = results.muscle_depth_cm === null ? 'Not measured' : `${results.muscle_depth_cm} cm`;
+            fatSummaryResultEl.textContent = `${results.fat_samples_n} marks · Sample SD ${results.fat_sd_cm} cm`;
+            fatRepetitionsResultEl.textContent = results.fat_measurements_cm
+                .map((v, i) => `EGS ${i+1}: ${v} cm (${(v*10).toFixed(2)} mm)`).join('  ·  ');
 
             if (state.analysisMode === 'batch_running') {
                 if (wasReview && Number.isInteger(state.lastBatchIndex) && state.batchRows[state.lastBatchIndex]) {
                     const row = state.batchRows[state.lastBatchIndex];
                     row.aol = results.aol_cm2;
                     row.egs = results.fat_thickness_cm;
+                    row.perimeterCm = results.aol_perimeter_cm;
+                    row.muscleDepthCm = results.muscle_depth_cm;
+                    row.fatSamplesCm = results.fat_measurements_cm;
+                    row.fatSdCm = results.fat_sd_cm;
+                    row.fatSamplesN = results.fat_samples_n;
                     row.pixelsPerCm = results.pixels_per_cm;
                     row.scaleLengthCm = results.scale_length_cm;
                     row.animalId = animalIdInput.value.trim();
@@ -254,6 +308,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const aol = results.aol_cm2, egs = results.fat_thickness_cm;
         state.batchRows.push({
             imageCode, aol, egs,
+            perimeterCm: results.aol_perimeter_cm,
+            muscleDepthCm: results.muscle_depth_cm,
+            fatSamplesCm: results.fat_measurements_cm,
+            fatSdCm: results.fat_sd_cm,
+            fatSamplesN: results.fat_samples_n,
             species: speciesInput.value,
             bodyCondition: bodyConditionInput.value.trim(),
             originalFilename: state.sourceFilename || '',
@@ -318,8 +377,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function confirmStep() {
+        if (state.currentStep === 'DRAWING_DEPTH' && !state.reviewMode) {
+            if (state.depthPoints.length === 2) calculateResults();
+            else skipMuscleDepth();
+            return;
+        }
         if (state.currentStep === 'DRAWING_FAT' && !state.reviewMode && state.fatPoints.length === 2) {
-            calculateResults();
+            finishFatLine();
             return;
         }
         if (state.currentStep === 'DRAWING_AOL') {
@@ -332,14 +396,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function undoLastPoint() {
-        if (state.currentStep === 'DRAWING_AOL' && state.aolPoints.length > 0) {
-            state.aolPoints.pop();
-            draw();
+        if (state.currentStep === 'DRAWING_AOL' && state.aolUndo.length > 0) {
+            undoAol();
         } else if (state.currentStep === 'CALIBRATING' && state.scalePoints.length > 0) {
             state.scalePoints.pop();
             draw();
         } else if (state.currentStep === 'DRAWING_FAT' && state.fatPoints.length > 0) {
             state.fatPoints.pop();
+            draw();
+        } else if (state.currentStep === 'DRAWING_DEPTH' && state.depthPoints.length > 0) {
+            state.depthPoints.pop();
             draw();
         }
     }
@@ -365,7 +431,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // -----------------------------------------------------------------------
     function setStep(newStep) {
         state.currentStep = newStep;
+        updateEgsProgress();
         updateModalInstructions();
+        updateAolToolbar();
         draw();
     }
 
@@ -435,6 +503,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateModalInstructions() {
         let title, text;
         confirmStepButton.style.display = 'none';
+        skipDepthButton.classList.add('hidden');
         confirmStepButton.textContent = 'Confirm Shape';
         switch (state.currentStep) {
             case 'CALIBRATING':
@@ -443,15 +512,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             case 'DRAWING_AOL':
                 title = 'Step 2 — Draw AOL';
-                text  = 'Click to add points. Drag to adjust. <strong>Right-click</strong> or <kbd>Backspace</kbd> to undo. Press <kbd>Enter</kbd> or click <em>Confirm Shape</em> when done.';
+                text = 'Choose <strong>Freehand</strong>, <strong>Polygon</strong>, or <strong>Edit points</strong> below. Confirm when the green border matches the muscle boundary.';
                 confirmStepButton.style.display = 'block';
                 break;
             case 'DRAWING_FAT':
-                title = 'Step 3 — Measure EGS';
-                text  = 'Click <strong>two points</strong> to measure subcutaneous fat thickness.';
+                title = `Step 3 — EGS ${state.activeFatIndex + 1}/${state.fatTarget}`;
+                text  = `Mark two anatomical interfaces for independent EGS measurement <strong>${state.activeFatIndex + 1}</strong> of <strong>${state.fatTarget}</strong>.`;
                 if (!state.reviewMode && state.fatPoints.length === 2) {
-                    confirmStepButton.textContent = 'Calculate';
+                    confirmStepButton.textContent = 'Next EGS';
                     confirmStepButton.style.display = 'block';
+                }
+                break;
+            case 'DRAWING_DEPTH':
+                title = 'Step 4 — Muscle depth (optional)';
+                text = 'Mark two points defining muscle depth according to your protocol, or choose <strong>Skip muscle depth</strong>. Avoid interpreting image height automatically as anatomical depth.';
+                skipDepthButton.classList.remove('hidden');
+                if (state.depthPoints.length === 2 && !state.reviewMode) {
+                    confirmStepButton.style.display = 'block';
+                    confirmStepButton.textContent = 'Calculate results';
                 }
                 break;
             case 'REVIEW':
@@ -519,13 +597,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         drawPoints(state.scalePoints, 'yellow', 5);
         drawSmoothPolygon(state.aolPoints, '#00ff00');
-        drawPoints(state.fatPoints, 'magenta', 5);
-
-        if (state.fatPoints.length === 1 && state.currentStep === 'DRAWING_FAT') {
-            drawLine(state.fatPoints[0], state.mousePos, 'rgba(255,0,255,0.5)', 2);
+        state.fatLines.forEach((line, index) => {
+            if (line.length === 2) {
+                const color = index === state.activeFatIndex ? '#eb35b8' : '#e772ba';
+                drawLine(line[0], line[1], color, 2.5);
+                drawLabel(`EGS ${index+1}`, line[0], color);
+            }
+            if (line.length && state.currentStep === 'DRAWING_FAT' && index === state.activeFatIndex) {
+                drawPoints(line, '#eb35b8', 5);
+                if (line.length === 1) drawLine(line[0], state.mousePos, 'rgba(235,53,184,.6)', 2);
+            }
+        });
+        if (state.depthPoints.length === 2) {
+            drawLine(state.depthPoints[0], state.depthPoints[1], '#2fd6de', 2.5);
+            drawLabel('Depth', state.depthPoints[0], '#2fd6de');
         }
-        if (state.fatPoints.length === 2) {
-            drawLine(state.fatPoints[0], state.fatPoints[1], 'magenta', 2);
+        if (state.currentStep === 'DRAWING_DEPTH') {
+            drawPoints(state.depthPoints, '#2fd6de', 5);
+            if (state.depthPoints.length === 1) drawLine(state.depthPoints[0], state.mousePos, '#2fd6de', 2);
         }
         modalCtx.restore();
     }
@@ -540,6 +629,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function drawLabel(text, position, color) {
+        modalCtx.font = `${12 / state.zoomLevel}px sans-serif`;
+        modalCtx.lineWidth = 3 / state.zoomLevel;
+        modalCtx.strokeStyle = 'rgba(0,0,0,.8)';
+        modalCtx.strokeText(text, position.x + 7 / state.zoomLevel, position.y - 7 / state.zoomLevel);
+        modalCtx.fillStyle = color;
+        modalCtx.fillText(text, position.x + 7 / state.zoomLevel, position.y - 7 / state.zoomLevel);
+    }
+
     function drawLine(p1, p2, color, width) {
         modalCtx.beginPath();
         modalCtx.moveTo(p1.x, p1.y);
@@ -549,49 +647,38 @@ document.addEventListener('DOMContentLoaded', () => {
         modalCtx.stroke();
     }
 
-    // Closed Catmull-Rom curve. Exactly the SAME sample points are used for
-    // drawing and for the server-side area measurement.
-    function sampleAolContour(points, samplesPerSegment = 12) {
-        if (points.length < 3) return points.slice();
-        const output = [], n = points.length;
-        for (let i = 0; i < n; i++) {
-            const p0 = points[(i - 1 + n) % n];
-            const p1 = points[i];
-            const p2 = points[(i + 1) % n];
-            const p3 = points[(i + 2) % n];
-            for (let j = 0; j < samplesPerSegment; j++) {
-                const t = j / samplesPerSegment, t2 = t * t, t3 = t2 * t;
-                const coord = k => 0.5 * (
-                    2 * p1[k] + (-p0[k] + p2[k]) * t +
-                    (2*p0[k] - 5*p1[k] + 4*p2[k] - p3[k]) * t2 +
-                    (-p0[k] + 3*p1[k] - 3*p2[k] + p3[k]) * t3);
-                output.push({ x: coord('x'), y: coord('y') });
-            }
-        }
-        return output;
+    // Unsmoothed ROI vertices: display and server area use the same coordinates.
+    function sampleAolContour(points) {
+        return EchoROI.copy(points);
     }
 
     function drawSmoothPolygon(points, color) {
         if (!points.length) return;
+        const isEditingAol = state.currentStep === 'DRAWING_AOL';
+        const freehandTracing = isEditingAol && state.aolStrokeActive;
+        modalCtx.beginPath();
+        modalCtx.moveTo(points[0].x, points[0].y);
+        points.slice(1).forEach(point => modalCtx.lineTo(point.x, point.y));
+        if (!freehandTracing && points.length >= 3) {
+            modalCtx.closePath();
+            modalCtx.fillStyle = 'rgba(40, 205, 127, 0.055)';
+            modalCtx.fill();
+        }
         modalCtx.strokeStyle = color;
         modalCtx.lineWidth = 2 / state.zoomLevel;
-        drawPoints(points, 'white', 5);
-        const sampled = sampleAolContour(points);
-        if (sampled.length > 1) {
-            modalCtx.beginPath();
-            modalCtx.moveTo(sampled[0].x, sampled[0].y);
-            sampled.slice(1).forEach(p => modalCtx.lineTo(p.x, p.y));
-            if (points.length >= 3) modalCtx.closePath();
-            modalCtx.stroke();
+        modalCtx.stroke();
+        if (isEditingAol && state.aolTool !== 'freehand' && !freehandTracing) {
+            drawPoints(points, '#fff', 4);
         }
-        if (state.currentStep === 'DRAWING_AOL' && points.length > 0) {
-            drawLine(points[points.length - 1], state.mousePos, 'rgba(0,255,0,0.4)', 2);
+        if (isEditingAol && state.aolTool === 'polygon' && points.length > 0) {
+            drawLine(points[points.length - 1], state.mousePos, 'rgba(0,255,0,0.38)', 2);
         }
     }
 
-    // -----------------------------------------------------------------------
+    // ---------------------------------------------------------------
     // Mouse handling
-    // -----------------------------------------------------------------------
+    // ---------------------------------------------------------------
+
     function getMousePos(event) {
         const rect = modalCanvas.getBoundingClientRect();
         return {
@@ -614,25 +701,69 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'CALIBRATING': return state.scalePoints;
             case 'DRAWING_AOL': return state.aolPoints;
             case 'DRAWING_FAT': return state.fatPoints;
+            case 'DRAWING_DEPTH': return state.depthPoints;
             default: return null;
         }
     }
 
     function onMouseDown(event) {
         if (event.button !== 0) return;
-        state.mousePos = getMousePos(event);
+        state.mousePos = aolPoint(getMousePos(event));
         const points = getCurrentPoints();
         if (!points) return;
+        if (state.currentStep === 'DRAWING_AOL') {
+            const idx = findPointAt(state.mousePos, state.aolPoints);
+            if (state.aolTool === 'freehand') {
+                captureAolChange();
+                state.aolPoints = [{...state.mousePos}];
+                state.aolStrokeActive = true;
+                draw();
+                return;
+            }
+            if (state.aolTool === 'edit') {
+                if (event.altKey && idx >= 0 && state.aolPoints.length > 3) {
+                    captureAolChange();
+                    state.aolPoints.splice(idx, 1);
+                    updateAolToolbar();
+                    draw();
+                    return;
+                }
+                if (event.shiftKey) {
+                    const hit = EchoROI.nearestSegment(state.mousePos, state.aolPoints);
+                    if (hit && hit.distance <= 12 / state.zoomLevel) {
+                        captureAolChange();
+                        const newIndex = hit.index + 1;
+                        state.aolPoints.splice(newIndex, 0, hit.projection);
+                        state.isDragging = true;
+                        state.draggedPointIndex = newIndex;
+                        draw();
+                    }
+                    return;
+                }
+            }
+            if (idx >= 0) {
+                captureAolChange();
+                state.isDragging = true;
+                state.draggedPointIndex = idx;
+            }
+            return;
+        }
         const idx = findPointAt(state.mousePos, points);
         if (idx !== -1) { state.isDragging = true; state.draggedPointIndex = idx; }
     }
 
     function onMouseMove(event) {
-        state.mousePos = getMousePos(event);
+        state.mousePos = aolPoint(getMousePos(event));
         const points = getCurrentPoints();
         if (!points) return;
-        if (state.isDragging) {
-            points[state.draggedPointIndex] = { ...state.mousePos };
+        if (state.currentStep === 'DRAWING_AOL' && state.aolStrokeActive) {
+            const last = state.aolPoints[state.aolPoints.length - 1];
+            if (state.aolPoints.length < 6000 &&
+                Math.hypot(last.x - state.mousePos.x, last.y - state.mousePos.y) >= 2 / state.zoomLevel) {
+                state.aolPoints.push({...state.mousePos});
+            }
+        } else if (state.isDragging) {
+            points[state.draggedPointIndex] = {...state.mousePos};
         } else {
             state.hoverPointIndex = findPointAt(state.mousePos, points);
         }
@@ -641,27 +772,144 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function onMouseUp(event) {
         if (event.button !== 0) return;
+        state.mousePos = aolPoint(getMousePos(event));
+        if (state.currentStep === 'DRAWING_AOL' && state.aolStrokeActive) {
+            const last = state.aolPoints[state.aolPoints.length - 1];
+            if (Math.hypot(last.x - state.mousePos.x, last.y - state.mousePos.y) > 0.5) {
+                state.aolPoints.push({...state.mousePos});
+            }
+            finishFreehandStroke();
+            return;
+        }
         if (state.isDragging) {
-            state.isDragging = false; state.draggedPointIndex = -1; draw(); return;
+            state.isDragging = false;
+            state.draggedPointIndex = -1;
+            updateAolToolbar();
+            draw();
+            return;
         }
         const points = getCurrentPoints();
         if (!points) return;
+        if (state.currentStep === 'DRAWING_AOL') {
+            if (state.aolTool !== 'polygon') return;
+            if (findPointAt(state.mousePos, points) !== -1) return;
+            if (points.length >= 2000) {
+                showToast('Too many vertices. Use Edit to refine the existing polygon.', 'error');
+                return;
+            }
+            captureAolChange();
+            points.push({...state.mousePos});
+            updateAolToolbar();
+            draw();
+            return;
+        }
         if (findPointAt(state.mousePos, points) !== -1) return;
-        if ((state.currentStep === 'CALIBRATING' || state.currentStep === 'DRAWING_FAT') && points.length >= 2) return;
-        points.push({ ...state.mousePos });
+        if ((state.currentStep === 'CALIBRATING' || state.currentStep === 'DRAWING_FAT' || state.currentStep === 'DRAWING_DEPTH') && points.length >= 2) return;
+        points.push({...state.mousePos});
         if (state.currentStep === 'CALIBRATING' && points.length === 2) {
             setStep(state.reviewMode ? 'REVIEW' : 'DRAWING_AOL');
         } else if (state.currentStep === 'DRAWING_FAT' && points.length === 2) {
+            if (state.reviewMode) setStep('REVIEW');
+            else finishFatLine();
+        } else if (state.currentStep === 'DRAWING_DEPTH' && points.length === 2) {
             if (state.reviewMode) setStep('REVIEW');
             else calculateResults();
         }
         draw();
     }
 
-    function onContextMenu(event) { event.preventDefault(); undoLastPoint(); }
+    function onContextMenu(event) {
+        event.preventDefault();
+        undoLastPoint();
+    }
+
+    // -------- EchoMetrics 2.2: editable freehand/polygon ROI controller --------
+    function aolPoint(pos) {
+        return {
+            x: Math.max(0, Math.min(state.image.width - 1, pos.x)),
+            y: Math.max(0, Math.min(state.image.height - 1, pos.y)),
+        };
+    }
+
+    function captureAolChange() {
+        state.aolUndo.push(EchoROI.copy(state.aolPoints));
+        if (state.aolUndo.length > 40) state.aolUndo.shift();
+        state.aolRedo = [];
+    }
+
+    function undoAol() {
+        if (state.aolUndo.length === 0) return;
+        state.aolRedo.push(EchoROI.copy(state.aolPoints));
+        state.aolPoints = state.aolUndo.pop();
+        updateAolToolbar();
+        draw();
+    }
+
+    function redoAol() {
+        if (state.aolRedo.length === 0) return;
+        state.aolUndo.push(EchoROI.copy(state.aolPoints));
+        state.aolPoints = state.aolRedo.pop();
+        updateAolToolbar();
+        draw();
+    }
+
+    function setAolTool(tool) {
+        if (!['freehand', 'polygon', 'edit'].includes(tool)) return;
+        if (state.aolStrokeActive) finishFreehandStroke();
+        state.aolTool = tool;
+        updateAolToolbar();
+        draw();
+    }
+
+    function updateAolToolbar() {
+        const isAolStep = state.currentStep === 'DRAWING_AOL';
+        aolToolPanel.classList.toggle('hidden', !isAolStep);
+        aolToolPanel.querySelectorAll('[data-aol-tool]').forEach(button => {
+            const active = button.dataset.aolTool === state.aolTool;
+            button.classList.toggle('is-active', active);
+            button.setAttribute('aria-pressed', String(active));
+        });
+        aolUndoButton.disabled = state.aolUndo.length === 0;
+        aolRedoButton.disabled = state.aolRedo.length === 0;
+        aolClearButton.disabled = state.aolPoints.length === 0;
+        const guidance = {
+            freehand: 'Freehand: hold the left mouse button and trace the muscle border. Release to close. A new stroke replaces the previous contour; Undo restores it.',
+            polygon: 'Polygon: click to add vertices. Drag existing vertices to adjust. Confirm shape when finished.',
+            edit: 'Edit: drag a vertex to move it. Shift+click near an edge to add a vertex; Alt+click a vertex to remove it.',
+        };
+        aolToolHelp.textContent = guidance[state.aolTool];
+    }
+
+    function finishFreehandStroke() {
+        if (!state.aolStrokeActive) return;
+        state.aolStrokeActive = false;
+        const reduced = EchoROI.simplifyFreehand(state.aolPoints, Math.max(0.5, 1.2 / state.zoomLevel));
+        if (reduced.length < 3 || EchoROI.area(reduced) < 1) {
+            state.aolPoints = state.aolUndo.pop() || [];
+            showToast('Trace a closed contour with sufficient area; try again.', 'error');
+        } else {
+            state.aolPoints = reduced;
+            if (EchoROI.selfIntersects(reduced)) {
+                showToast('The contour crosses itself. Choose Edit to correct it before confirming.', 'error');
+            } else {
+                showToast('Contour captured. You can choose Edit to refine its vertices.', 'success');
+            }
+        }
+        updateAolToolbar();
+        draw();
+    }
+
+    function clearAolContour() {
+        if (state.currentStep !== 'DRAWING_AOL' || state.aolPoints.length === 0) return;
+        captureAolChange();
+        state.aolPoints = [];
+        updateAolToolbar();
+        draw();
+    }
 
 
     // ---------- Annotation review (retains the last completed image) ----------
+
     function updateMeasurementContext() {
         const parts = [];
         const speciesLabel = speciesInput.options[speciesInput.selectedIndex]?.text;
@@ -683,6 +931,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         state.reviewSnapshot = {
+            fatLines: state.fatLines.map(clonePoints),
+            activeFatIndex: state.activeFatIndex,
+            depthPoints: clonePoints(state.depthPoints),
             scalePoints: clonePoints(state.scalePoints),
             aolPoints: clonePoints(state.aolPoints),
             fatPoints: clonePoints(state.fatPoints),
@@ -690,6 +941,11 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         state.reviewMode = true;
         reviewToolbar.classList.remove('hidden');
+        reviewFatSelect.replaceChildren(...state.fatLines.map((_, i) => {
+            const o = document.createElement('option');
+            o.value = String(i); o.textContent = `EGS ${i+1}`; return o;
+        }));
+        selectFatLine(0);
         openModal();
         setStep('REVIEW');
     }
@@ -698,7 +954,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.reviewSnapshot) {
             state.scalePoints = clonePoints(state.reviewSnapshot.scalePoints);
             state.aolPoints = clonePoints(state.reviewSnapshot.aolPoints);
-            state.fatPoints = clonePoints(state.reviewSnapshot.fatPoints);
+            state.fatLines = state.reviewSnapshot.fatLines.map(clonePoints);
+            state.activeFatIndex = state.reviewSnapshot.activeFatIndex;
+            state.fatPoints = state.fatLines[state.activeFatIndex];
+            state.depthPoints = clonePoints(state.reviewSnapshot.depthPoints);
             scaleLengthInput.value = state.reviewSnapshot.scaleLength;
         }
         state.reviewMode = false;
@@ -710,6 +969,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function selectReviewTool(step, buttonId) {
         if (!state.reviewMode) return;
+        if (step === 'DRAWING_AOL') state.aolTool = 'edit';
         setStep(step);
         reviewToolbar.querySelectorAll('.review-edit-tools button').forEach(btn => {
             btn.classList.toggle('is-active', btn.id === buttonId);
@@ -720,9 +980,47 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!state.reviewMode) return;
         if (state.currentStep === 'CALIBRATING') state.scalePoints = [];
         else if (state.currentStep === 'DRAWING_AOL') state.aolPoints = [];
-        else if (state.currentStep === 'DRAWING_FAT') state.fatPoints = [];
+        else if (state.currentStep === 'DRAWING_FAT') {
+            state.fatLines[state.activeFatIndex] = [];
+            state.fatPoints = state.fatLines[state.activeFatIndex];
+        }
+        else if (state.currentStep === 'DRAWING_DEPTH') state.depthPoints = [];
         else showToast('Select scale, AOL or EGS before clearing points.', 'info');
         draw();
+    }
+
+    // ---------- EchoMetrics 2.3 morphometric measurement controls ----------
+    function selectFatLine(index) {
+        const i = Number(index);
+        if (!Number.isInteger(i) || i < 0 || i >= state.fatLines.length) return;
+        state.activeFatIndex = i;
+        state.fatPoints = state.fatLines[i];
+        reviewFatSelect.value = String(i);
+        updateEgsProgress();
+        draw();
+    }
+
+    function updateEgsProgress() {
+        const visible = ['DRAWING_FAT', 'DRAWING_DEPTH'].includes(state.currentStep) || state.reviewMode;
+        egsStepInfo.classList.toggle('hidden', !visible);
+        if (visible) egsStepInfo.textContent = `EGS ${state.activeFatIndex + 1}/${state.fatTarget} · ${state.fatLines.filter(l => l.length === 2).length} complete`; 
+    }
+
+    function finishFatLine() {
+        if (state.fatPoints.length !== 2) return;
+        if (state.reviewMode) { setStep('REVIEW'); return; }
+        if (state.activeFatIndex + 1 < state.fatTarget) {
+            selectFatLine(state.activeFatIndex + 1);
+            setStep('DRAWING_FAT');
+        } else {
+            setStep('DRAWING_DEPTH');
+        }
+    }
+
+    function skipMuscleDepth() {
+        if (state.reviewMode) return;
+        state.depthPoints = [];
+        calculateResults();
     }
 
     // -----------------------------------------------------------------------
@@ -730,11 +1028,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // -----------------------------------------------------------------------
     function onKeyDown(event) {
         if (modal.style.display !== 'flex') return;
+        if ((event.ctrlKey || event.metaKey) && state.currentStep === 'DRAWING_AOL') {
+            if (event.key.toLowerCase() === 'z') {
+                event.preventDefault();
+                if (event.shiftKey) redoAol(); else undoAol();
+                return;
+            }
+            if (event.key.toLowerCase() === 'y') {
+                event.preventDefault();
+                redoAol();
+                return;
+            }
+        }
         switch (event.key) {
-            case 'Escape':    closeModal(); break;
+            case 'Escape': closeModal(); break;
             case 'Backspace':
-            case 'Delete':    event.preventDefault(); undoLastPoint(); break;
-            case 'Enter':     event.preventDefault(); confirmStep(); break;
+            case 'Delete': event.preventDefault(); undoLastPoint(); break;
+            case 'Enter': event.preventDefault(); confirmStep(); break;
         }
     }
 
@@ -750,9 +1060,13 @@ document.addEventListener('DOMContentLoaded', () => {
     confirmStepButton.addEventListener('click', confirmStep);
     zoomInButton.addEventListener('click',  () => updateZoom(state.zoomLevel + 0.2));
     zoomOutButton.addEventListener('click', () => updateZoom(state.zoomLevel - 0.2));
-    modalCanvas.addEventListener('mousedown',   onMouseDown);
-    modalCanvas.addEventListener('mousemove',   onMouseMove);
-    modalCanvas.addEventListener('mouseup',     onMouseUp);
+    modalCanvas.addEventListener('mousedown', onMouseDown);
+    modalCanvas.addEventListener('mousemove', onMouseMove);
+    modalCanvas.addEventListener('mouseup', onMouseUp);
+    modalCanvas.addEventListener('mouseleave', () => {
+        if (state.aolStrokeActive) finishFreehandStroke();
+        if (state.isDragging) { state.isDragging = false; state.draggedPointIndex = -1; }
+    });
     modalCanvas.addEventListener('contextmenu', onContextMenu);
     modeRadios.forEach(r => r.addEventListener('change', handleModeChange));
     startBatchButton.addEventListener('click', startBatch);
@@ -765,7 +1079,19 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('reviewEditScale').addEventListener('click', () => selectReviewTool('CALIBRATING', 'reviewEditScale'));
     document.getElementById('reviewEditAol').addEventListener('click', () => selectReviewTool('DRAWING_AOL', 'reviewEditAol'));
     document.getElementById('reviewEditFat').addEventListener('click', () => selectReviewTool('DRAWING_FAT', 'reviewEditFat'));
+    reviewEditDepth.addEventListener('click', () => selectReviewTool('DRAWING_DEPTH', 'reviewEditDepth'));
+    reviewFatSelect.addEventListener('change', () => {
+        selectFatLine(Number(reviewFatSelect.value));
+        if (state.reviewMode) selectReviewTool('DRAWING_FAT', 'reviewEditFat');
+    });
+    skipDepthButton.addEventListener('click', skipMuscleDepth);
     document.getElementById('reviewClearPoints').addEventListener('click', clearReviewPoints);
+    aolToolPanel.querySelectorAll('[data-aol-tool]').forEach(button => {
+        button.addEventListener('click', () => setAolTool(button.dataset.aolTool));
+    });
+    aolUndoButton.addEventListener('click', undoAol);
+    aolRedoButton.addEventListener('click', redoAol);
+    aolClearButton.addEventListener('click', clearAolContour);
 
     // -----------------------------------------------------------------------
     // Init

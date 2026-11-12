@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EchoMetrics — Carcass Ultrasound Analyzer</title>
+    <title>EchoMetrics 2.4 — Carcass Ultrasound Analyzer</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/v2-ui.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/theme-v24.css') }}">
 </head>
 <body>
     <div id="toast-container"></div>
@@ -29,7 +30,11 @@
             <p>Carcass Ultrasound Analyzer</p>
             </div>
             <div class="header-support">
-                <span class="ui-version">v2.0 · Development</span>
+                <div class="header-preferences" role="group" aria-label="Appearance and language">
+                    <button type="button" id="themeToggle" class="preference-button" aria-label="Toggle light or dark mode" title="Toggle theme">Dark</button>
+                    <button type="button" id="languageToggle" class="preference-button" aria-label="Alterar para português" title="Change language">PT-BR</button>
+                </div>
+                <span class="ui-version">v2.4 · Development</span>
                 <a class="header-link" href="https://github.com/CintiaAraujo-Zoo/EchoMetrics" target="_blank" rel="noopener noreferrer"><i class="fa-brands fa-github" aria-hidden="true"></i> Source code</a>
             </div>
         </header>
@@ -94,6 +99,15 @@
                 </div>
                 <hr>
 
+                <div class="morphometry-options">
+                    <label for="fatMeasurementCount">EGS measurements per image</label>
+                    <select id="fatMeasurementCount" aria-label="Number of independent subcutaneous fat thickness measurements">
+                        <option value="1">1 measurement</option>
+                        <option value="2">2 measurements</option>
+                        <option value="3" selected>3 measurements</option>
+                    </select>
+                    <p class="morphometry-help">Set before loading. Each EGS line is measured independently.</p>
+                </div>
                 <div id="file-upload-area">
                     <span class="upload-heading">Ultrasound image</span>
                     <label for="imageLoader" id="uploadDropzone" class="upload-dropzone">
@@ -148,11 +162,17 @@
                     <strong id="aolResult">-- cm²</strong>
                 </div>
                 <div class="result-item">
-                    <span>Subcutaneous fat thickness (EGS):</span>
+                    <span>Mean subcutaneous fat thickness (EGS):</span>
                     <strong id="fatResult">-- cm</strong>
                 </div>
                 <div class="result-item-small">
-                    <span>Calibration:</span>
+                    <div class="morphometry-summary">
+                    <div><span>AOL perimeter:</span> <strong id="perimeterResult">-- cm</strong></div>
+                    <div><span>Muscle depth (manual):</span> <strong id="depthResult">-- cm</strong></div>
+                    <div><span>EGS summary:</span> <strong id="fatSummaryResult">--</strong></div>
+                    <div id="fatRepetitionsResult" class="fat-repetitions" aria-live="polite"></div>
+                </div>
+                <span>Calibration:</span>
                     <i id="calibrationResult">-- px/cm</i>
                 </div>
                 <p id="measurementContext" class="measurement-context hidden" aria-live="polite"></p>
@@ -188,6 +208,10 @@
                     <button type="button" id="reviewEditScale">Edit scale</button>
                     <button type="button" id="reviewEditAol">Edit AOL</button>
                     <button type="button" id="reviewEditFat">Edit EGS</button>
+                    <select id="reviewFatSelect" aria-label="Choose EGS mark to review">
+                        <option value="0">EGS 1</option><option value="1">EGS 2</option><option value="2">EGS 3</option>
+                    </select>
+                    <button type="button" id="reviewEditDepth">Edit depth</button>
                     <button type="button" id="reviewClearPoints">Clear selected tool points</button>
                 </div>
                 <div class="review-decision-tools">
@@ -195,9 +219,25 @@
                     <button type="button" id="reviewSave" class="btn btn-success">Recalculate &amp; save</button>
                 </div>
             </div>
+            <div id="aolToolPanel" class="aol-tool-panel hidden" aria-label="AOL contour drawing tools">
+                <div class="aol-tool-options" role="group" aria-label="Contour mode">
+                    <strong>Contour mode</strong>
+                    <button type="button" data-aol-tool="freehand" aria-pressed="true">Freehand</button>
+                    <button type="button" data-aol-tool="polygon" aria-pressed="false">Polygon</button>
+                    <button type="button" data-aol-tool="edit" aria-pressed="false">Edit points</button>
+                </div>
+                <div class="aol-tool-actions" role="group" aria-label="Contour actions">
+                    <button type="button" id="aolUndo" title="Undo contour edit (Ctrl+Z)">Undo</button>
+                    <button type="button" id="aolRedo" title="Redo contour edit (Ctrl+Y)">Redo</button>
+                    <button type="button" id="aolClear" title="Clear only the AOL contour">Clear AOL</button>
+                </div>
+                <p id="aolToolHelp" aria-live="polite"></p>
+            </div>
+            <p id="egsStepInfo" class="egs-step-info hidden" aria-live="polite"></p>
             <div class="modal-body"><canvas id="modalCanvas"></canvas></div>
             <div class="modal-footer">
                 <p id="modalInstructions">Instructions will appear here.</p>
+                <button id="skipDepthButton" type="button" class="btn btn-secondary hidden">Skip muscle depth</button>
                 <button id="confirm-step-button" class="btn btn-success">
                     <i class="fa-solid fa-check"></i> Confirm Shape
                 </button>
@@ -205,7 +245,9 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/roi-geometry.js') }}"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/v2-ui.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/v2-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/preferences-v24.js') }}"></script>
 </body>
 </html>

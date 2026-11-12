@@ -1,0 +1,86 @@
+/* EchoMetrics 2.4 — visual preferences. Only styles; no image pixel manipulation. */
+.header-preferences { display: inline-flex; align-items: center; gap: 7px; }
+.preference-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 36px; padding: 8px 11px; border: 1px solid var(--ui-border, #dce7e9);
+  border-radius: 9px; color: var(--ui-ink, #244650); background: var(--ui-card, white);
+  cursor: pointer; font: 500 .78rem 'Poppins', sans-serif; white-space: nowrap; }
+.preference-button:hover { border-color: var(--ui-teal, #1a7880); }
+.preference-button:focus-visible { outline: 2px solid #48aba6; outline-offset: 2px; }
+.preference-button i { margin: 0; }
+
+html[data-theme="dark"] { color-scheme: dark;
+  --primary-color: #82cbd0; --secondary-color: #a5bcc2; --success-color: #67c4a9; --danger-color: #ff929a;
+  --bg-color: #111e24; --surface-color: #1b2a31; --border-color: #3a5059;
+  --text-color: #e8f1f2; --text-muted: #a8bbc0;
+  --ui-ink: #e8f1f2; --ui-muted: #aec1c5; --ui-border: #3b535c;
+  --ui-teal: #9bd7d7; --ui-teal-soft: #20444a; --ui-bg: #111e24; --ui-card: #1a2b33;
+  --box-shadow: 0 10px 30px rgba(0,0,0,.18);
+}
+html[data-theme="dark"] body,
+html[data-theme="dark"] .container { color: var(--ui-ink); background: var(--ui-bg); }
+html[data-theme="dark"] header.app-header,
+html[data-theme="dark"] .controls-panel,
+html[data-theme="dark"] .results-panel,
+html[data-theme="dark"] .canvas-container,
+html[data-theme="dark"] .modal-content { background: var(--ui-card); border-color: var(--ui-border); color: var(--ui-ink); }
+html[data-theme="dark"] header.app-header h1, html[data-theme="dark"] .workspace-heading h2,
+html[data-theme="dark"] .panel-heading h2, html[data-theme="dark"] .modal-header h2,
+html[data-theme="dark"] h2, html[data-theme="dark"] h3,
+html[data-theme="dark"] .mode-selection strong { color: var(--ui-ink); }
+html[data-theme="dark"] .workspace-heading p, html[data-theme="dark"] .panel-heading p,
+html[data-theme="dark"] .panel-eyebrow, html[data-theme="dark"] .workspace-eyebrow,
+html[data-theme="dark"] header.app-header p, html[data-theme="dark"] .workspace-note,
+html[data-theme="dark"] .result-item span, html[data-theme="dark"] .result-item-small,
+html[data-theme="dark"] .metadata-fields label, html[data-theme="dark"] .morphometry-help,
+html[data-theme="dark"] footer, html[data-theme="dark"] .results-hint { color: var(--ui-muted); }
+html[data-theme="dark"] .workflow-steps { background: #1c333a; border-color: var(--ui-border); }
+html[data-theme="dark"] .workflow-step { color: #bdcdd1; }
+html[data-theme="dark"] .workflow-step .step-number { background: #365159; color: #e7f2f3; }
+html[data-theme="dark"] .workflow-step.is-current { background: #2b4c52; color: #c9f5ed; }
+html[data-theme="dark"] .workflow-step.is-complete .step-number { background: #2f6660; color: #d9f9f0; }
+html[data-theme="dark"] .ui-version { background: #234d4e; color: #c5f4ef; }
+html[data-theme="dark"] .header-link { background: #233940; border-color: var(--ui-border); color: #e1f0f1; }
+html[data-theme="dark"] .header-link:hover { background: #2a4c50; }
+html[data-theme="dark"] .mode-selection label { background: #22373f; color: #c3d3d6; border-color: var(--ui-border); }
+html[data-theme="dark"] .mode-selection label:has(input:checked) { background: #245451; color: #e7fffa; border-color: #5a9e95; }
+html[data-theme="dark"] .metadata-fields input,
+html[data-theme="dark"] .metadata-fields select,
+html[data-theme="dark"] #batch-controls input,
+html[data-theme="dark"] .morphometry-options select,
+html[data-theme="dark"] #reviewFatSelect,
+html[data-theme="dark"] .roi-mode-select,
+html[data-theme="dark"] select,
+html[data-theme="dark"] input[type="text"],
+html[data-theme="dark"] input[type="number"] { background: #1e333c; color: #eef7f8; border-color: #46616b; }
+html[data-theme="dark"] input::placeholder { color: #9eb0b7; }
+html[data-theme="dark"] .upload-dropzone { background: #1e3b3e; color: #c6f1ed; border-color: #508480; }
+html[data-theme="dark"] .upload-dropzone:hover { background: #25484a; }
+html[data-theme="dark"] .upload-icon, html[data-theme="dark"] .empty-icon { background: #2b5151; color: #c2eeea; border-color: #426b69; }
+html[data-theme="dark"] .canvas-container.has-image { background: #18282e; }
+html[data-theme="dark"] .canvas-container .empty-stage,
+html[data-theme="dark"] .empty-stage h3, html[data-theme="dark"] .empty-stage p { color: #b5cbd0; }
+html[data-theme="dark"] .results-panel .result-item, html[data-theme="dark"] .panel-heading,
+html[data-theme="dark"] .controls-panel hr, html[data-theme="dark"] footer,
+html[data-theme="dark"] .morphometry-options, html[data-theme="dark"] .morphometry-summary { border-color: var(--ui-border); }
+html[data-theme="dark"] .results-panel .result-item strong,
+html[data-theme="dark"] .morphometry-summary strong,
+html[data-theme="dark"] #calibrationResult { color: #8ce0c8; }
+html[data-theme="dark"] .result-item-small, html[data-theme="dark"] #instructions,
+html[data-theme="dark"] #modalInstructions, html[data-theme="dark"] .egs-step-info,
+html[data-theme="dark"] .measurement-context { background: #203d41; border-color: #416a69; color: #d1e9e7; }
+html[data-theme="dark"] #instructions h3 { color: #b0e2d7; }
+html[data-theme="dark"] .btn-secondary, html[data-theme="dark"] .preference-button { color: #e4f1f0; background: #2a434b; border-color: #4b686f; }
+html[data-theme="dark"] .btn-secondary:hover, html[data-theme="dark"] .preference-button:hover { background: #36585d; }
+html[data-theme="dark"] .btn-danger { background: #382e35; color: #ffb4b7; border-color: #65434b; }
+html[data-theme="dark"] .btn-primary { background: #216b75; color: #fff; }
+html[data-theme="dark"] .btn-success { background: #1c755e; color: #fff; }
+html[data-theme="dark"] .modal-header { border-color: var(--ui-border); }
+html[data-theme="dark"] #zoom-level, html[data-theme="dark"] .close-button { color: #d5e8e8; }
+html[data-theme="dark"] .modal-body { border-color: #4b6269; background: #0d1519; }
+html[data-theme="dark"] footer a { color: #91d9d0; }
+/* Never invert scientific images or canvas pixels. */
+html[data-theme="dark"] #finalImage, html[data-theme="dark"] #modalCanvas { filter: none !important; }
+@media (max-width: 650px) {
+  .header-preferences { flex-wrap: wrap; }
+  .preference-button { font-size: .74rem; padding: 8px 9px; }
+}

@@ -206,15 +206,48 @@ def calculate():
             return jsonify({"error": "AOL contour is degenerate"}), 400
         aol_cm2 = area_px / (pixels_per_cm ** 2)
 
-        p1f, p2f = _two_points(data, "fatPoints")
-        fat_cm = math.dist(p1f, p2f) / pixels_per_cm
-        if not (math.isfinite(aol_cm2) and math.isfinite(fat_cm)):
-            return jsonify({"error": "Non-finite result"}), 400
+        # Same vertices define both displayed closed polygon and calculation.
+        perimeter_px = float(cv2.arcLength(aol_pts, True))
+        perimeter_cm = perimeter_px / pixels_per_cm
+        lines = data.get("fatMeasurements")
+        if lines is None:
+            lines = [data["fatPoints"]]   # compatibility with 2.1 clients
+        if not isinstance(lines, list) or not 1 <= len(lines) <= 3:
+            raise ValueError("fatMeasurements must contain 1 to 3 lines")
+        fat_values = []
+        for i, line in enumerate(lines):
+            if not isinstance(line, list) or len(line) != 2:
+                raise ValueError(f"EGS line {i+1} needs exactly two points")
+            p1, p2 = _finite_point(line[0]), _finite_point(line[1])
+            distance = math.dist(p1, p2) / pixels_per_cm
+            if distance < 1e-7:
+                raise ValueError(f"EGS line {i+1} is too short")
+            fat_values.append(distance)
+        fat_cm = sum(fat_values) / len(fat_values)
+        # Sample SD, defined only when n > 1; n=1 returns 0 for display/export.
+        fat_sd_cm = (sum((v-fat_cm)**2 for v in fat_values) / (len(fat_values)-1))**0.5 if len(fat_values) > 1 else 0.0
+        depth = data.get("depthPoints")
+        depth_cm = None
+        if depth is not None:
+            if not isinstance(depth, list) or len(depth) != 2:
+                raise ValueError("depthPoints must contain exactly two points")
+            p1d, p2d = _finite_point(depth[0]), _finite_point(depth[1])
+            depth_cm = math.dist(p1d, p2d) / pixels_per_cm
+            if depth_cm < 1e-7:
+                raise ValueError("Depth line is too short")
+        if not all(math.isfinite(v) for v in (aol_cm2, perimeter_cm, fat_cm, fat_sd_cm)):
+            raise ValueError("Non-finite result")
 
         return jsonify({
             "aol_cm2": round(aol_cm2, 3),
-            "fat_thickness_cm": round(fat_cm, 3),
-            "fat_thickness_mm": round(fat_cm * 10, 2),
+            "aol_perimeter_cm": round(perimeter_cm, 3),
+            "muscle_depth_cm": round(depth_cm, 3) if depth_cm is not None else None,
+            "fat_thickness_cm": round(fat_cm, 3),  # legacy output: EGS mean
+            "fat_thickness_mm": round(fat_cm * 10, 3),
+            "fat_measurements_cm": [round(v, 4) for v in fat_values],
+            "fat_mean_cm": round(fat_cm, 4),
+            "fat_sd_cm": round(fat_sd_cm, 4),
+            "fat_samples_n": len(fat_values),
             "pixels_per_cm": round(pixels_per_cm, 3),
             "scale_length_cm": scale_cm,
         })
@@ -260,9 +293,20 @@ def download_excel():
             text = str(value or '')[:255]
             return "'" + text if text.startswith(('=', '+', '-', '@')) else text
 
+        def optional_number(value):
+            if value is None or value == '':
+                return None
+            number = float(value)
+            if not math.isfinite(number):
+                raise ValueError('Non-finite optional Excel field')
+            return number
+
         ws.append(["Animal ID", "Session ID", "Image", "Original filename", "AOL (cm²)", "EGS (cm)",
                    "EGS (mm)", "Calibration (px/cm)", "Scale length (cm)",
-                   "Species", "Body condition score"])
+                   "Species", "Body condition score",
+                   "AOL perimeter (cm)", "Muscle depth (cm)",
+                   "EGS 1 (cm)", "EGS 2 (cm)", "EGS 3 (cm)",
+                   "EGS SD (cm)", "EGS n"])
         for row in data["rows"]:
             aol = float(row["aol"])
             egs = float(row["egs"])
@@ -280,11 +324,20 @@ def download_excel():
                 float(row.get("scaleLengthCm", 0)) or None,
                 excel_text(row.get("species", "")),
                 excel_text(row.get("bodyCondition", "")),
+                optional_number(row.get("perimeterCm")),
+                optional_number(row.get("muscleDepthCm")),
+                *[optional_number((row.get("fatSamplesCm") or [])[i])
+                  if i < len(row.get("fatSamplesCm") or []) else None
+                  for i in range(3)],
+                optional_number(row.get("fatSdCm")),
+                optional_number(row.get("fatSamplesN")),
             ])
         ws.freeze_panes = 'A2'
         ws.auto_filter.ref = ws.dimensions
         for col, width in {'A': 22, 'B': 22, 'C': 20, 'D': 30, 'E': 16,
-                           'F': 16, 'G': 16, 'H': 26, 'I': 22, 'J': 20, 'K': 24}.items():
+                           'F': 16, 'G': 16, 'H': 26, 'I': 22, 'J': 20, 'K': 24,
+                           'L': 22, 'M': 22, 'N': 19, 'O': 19, 'P': 19,
+                           'Q': 20, 'R': 13}.items():
             ws.column_dimensions[col].width = width
 
         buf = io.BytesIO()
